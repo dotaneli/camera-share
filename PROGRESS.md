@@ -7,9 +7,9 @@
 
 ## Milestones
 
-- [x] **M0: Empty shell** — Preview APK on phone. ✅ (4 builds used, lesson learned about dev vs preview)
-- [ ] **M0.5: Logging** — Sentry + structured logging. (OTA) ← NEXT
-- [ ] **M1: Role selection** — "Camera" / "Viewfinder" buttons + navigation. (OTA)
+- [x] **M0: Empty shell** — Preview APK on phone. ✅
+- [x] **M0.5: Logging** — Structured logger (react-native-logs). ✅
+- [x] **M1: Role selection** — Buttons + navigation + audit fixes. ✅ Confirmed on device.
 - [ ] **M2: QR pairing UI** — QR display + scan + room ID exchange. (needs build — native dep)
 - [ ] **M3: Firebase signaling** — Room creation, joining, message exchange. (needs build — native dep)
 - [ ] **M4: WebRTC streaming** — Live video from camera to viewfinder. (needs build — native dep)
