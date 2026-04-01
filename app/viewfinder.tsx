@@ -1,10 +1,12 @@
 import { StyleSheet, Text, View, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppStore } from '../lib/store';
 import log from '../lib/logger';
 
 export default function ViewfinderScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const resetRole = useAppStore((s) => s.resetRole);
 
   const handleBack = () => {
@@ -15,8 +17,8 @@ export default function ViewfinderScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Pressable onPress={handleBack} style={styles.backButton}>
+      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
+        <Pressable onPress={handleBack} style={styles.backButton} accessibilityLabel="Go back" accessibilityRole="button">
           <Text style={styles.backText}>← Back</Text>
         </Pressable>
       </View>
@@ -37,7 +39,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
   },
   header: {
-    paddingTop: 60,
     paddingHorizontal: 20,
   },
   backButton: {
