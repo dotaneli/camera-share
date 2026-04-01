@@ -1,16 +1,18 @@
 # CameraShare — Progress Tracker
 
-## Current: Milestone 0 — Empty Shell on Device
+## Current: Milestone 0.5 (Logging) + Milestone 1 (Role Selection)
 
-## EAS Build Count: 0 / 30 (free tier monthly limit)
+## EAS Build Count: 4 / 30 (free tier monthly limit, resets monthly)
+## Deploy method: `eas update --branch preview` (free, unlimited, ~30s)
 
 ## Milestones
 
-- [ ] **M0: Empty shell** — Bare Expo app on phone. Proves pipeline works. (Build #1)
+- [x] **M0: Empty shell** — Preview APK on phone. ✅ (4 builds used, lesson learned about dev vs preview)
+- [ ] **M0.5: Logging** — Sentry + structured logging. (OTA) ← NEXT
 - [ ] **M1: Role selection** — "Camera" / "Viewfinder" buttons + navigation. (OTA)
-- [ ] **M2: QR pairing UI** — QR display + scan + room ID exchange. (Build #2-3)
-- [ ] **M3: Firebase signaling** — Room creation, joining, message exchange. (Build #4-5)
-- [ ] **M4: WebRTC streaming** — Live video from camera to viewfinder. (Build #6-7)
+- [ ] **M2: QR pairing UI** — QR display + scan + room ID exchange. (needs build — native dep)
+- [ ] **M3: Firebase signaling** — Room creation, joining, message exchange. (needs build — native dep)
+- [ ] **M4: WebRTC streaming** — Live video from camera to viewfinder. (needs build — native dep)
 - [ ] **M5: Remote shutter** — Tap to capture full-res photo. (OTA)
 - [ ] **M6: Photo transfer** — Full-res photo to viewfinder phone. (OTA)
 - [ ] **M7: Resilience** — Auto-reconnect, heartbeat, lifecycle handling. (OTA) **= MVP DONE**
@@ -23,10 +25,12 @@
 - [x] Firebase project (camera-share-e9232, RTDB + anonymous auth enabled)
 - [x] Apple Developer account enrolled
 - [x] EAS CLI installed globally
+- [x] Preview APK on user's Android phone (standalone, OTA-capable)
 
 ## Accounts
-- Expo: dotaneli (logged in)
-- GitHub: dotaneli (authenticated)
-- Firebase: camera-share-e9232 (RTDB + auth ready)
-- Apple Developer: enrolled
-- Cloudflare: not yet (needed Week 2 for TURN, not blocking)
+- Expo: dotaneli (logged in, EAS builds working)
+- GitHub: dotaneli (authenticated, push working)
+- Firebase: camera-share-e9232 (RTDB + auth ready, not yet in code)
+- Apple Developer: enrolled (no iOS builds yet)
+- Cloudflare: not yet (needed for TURN in M4)
+- Sentry: NOT YET — needed for M0.5

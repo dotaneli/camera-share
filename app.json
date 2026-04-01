@@ -29,6 +29,16 @@
         "projectId": "7eb802db-880d-4d33-bc5c-8391f630fab8"
       }
     },
-    "owner": "dotaneli"
+    "owner": "dotaneli",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/7eb802db-880d-4d33-bc5c-8391f630fab8"
+    },
+    "scheme": "camerashare",
+    "plugins": [
+      "expo-router"
+    ]
   }
 }
