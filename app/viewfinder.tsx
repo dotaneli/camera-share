@@ -6,8 +6,44 @@ import { decodeQRPayload } from '../lib/pairing';
 import { useAppStore } from '../lib/store';
 import log from '../lib/logger';
 
-// Loaded lazily in useEffect to avoid expo-router eager import crash
-let VisionCamera: any = null;
+// Separate component for the camera — only rendered after lazy load
+function QRScanner({ onScanned }: { onScanned: (roomId: string) => void }) {
+  const { Camera, useCameraDevice, useCodeScanner } = require('react-native-vision-camera');
+  const device = useCameraDevice('back');
+  const hasScanned = useRef(false);
+
+  const codeScanner = useCodeScanner({
+    codeTypes: ['qr'],
+    onCodeScanned: (codes: any[]) => {
+      if (hasScanned.current) return;
+      const qrValue = codes[0]?.value;
+      if (!qrValue) return;
+      const result = decodeQRPayload(qrValue);
+      if (result) {
+        hasScanned.current = true;
+        log.info('QR scanned successfully');
+        onScanned(result.roomId);
+      }
+    },
+  });
+
+  if (!device) {
+    return (
+      <View style={styles.content}>
+        <Text style={styles.status}>No camera found</Text>
+      </View>
+    );
+  }
+
+  return (
+    <Camera
+      style={StyleSheet.absoluteFill}
+      device={device}
+      isActive={true}
+      codeScanner={codeScanner}
+    />
+  );
+}
 
 export default function ViewfinderScreen() {
   const router = useRouter();
@@ -17,20 +53,15 @@ export default function ViewfinderScreen() {
   const [manualCode, setManualCode] = useState('');
   const [showManualEntry, setShowManualEntry] = useState(false);
   const [permissionStatus, setPermissionStatus] = useState<string>('unknown');
-  const [cameraReady, setCameraReady] = useState(false);
-  const hasScanned = useRef(false);
 
-  // Lazy load vision-camera and request permissions
   useEffect(() => {
     (async () => {
-      VisionCamera = require('react-native-vision-camera');
-      setCameraReady(true);
-
-      const status = await VisionCamera.Camera.getCameraPermissionStatus();
+      const VC = require('react-native-vision-camera');
+      const status = await VC.Camera.getCameraPermissionStatus();
       if (status === 'granted') {
         setPermissionStatus('granted');
       } else {
-        const result = await VisionCamera.Camera.requestCameraPermission();
+        const result = await VC.Camera.requestCameraPermission();
         setPermissionStatus(result);
         if (result !== 'granted') {
           log.warn('Camera permission denied');
@@ -58,7 +89,6 @@ export default function ViewfinderScreen() {
   };
 
   const handleReset = () => {
-    hasScanned.current = false;
     setScannedRoomId(null);
     setManualCode('');
     setShowManualEntry(false);
@@ -147,9 +177,6 @@ export default function ViewfinderScreen() {
   }
 
   // QR Scanner view
-  const CameraComponent = cameraReady ? VisionCamera.Camera : null;
-  const device = cameraReady ? VisionCamera.useCameraDevice?.('back') : null;
-
   return (
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + 12, position: 'absolute', zIndex: 10, left: 0, right: 0 }]}>
@@ -158,26 +185,8 @@ export default function ViewfinderScreen() {
         </Pressable>
       </View>
 
-      {CameraComponent && device && permissionStatus === 'granted' ? (
-        <CameraComponent
-          style={StyleSheet.absoluteFill}
-          device={device}
-          isActive={true}
-          codeScanner={{
-            codeTypes: ['qr'],
-            onCodeScanned: (codes: any[]) => {
-              if (hasScanned.current) return;
-              const qrValue = codes[0]?.value;
-              if (!qrValue) return;
-              const result = decodeQRPayload(qrValue);
-              if (result) {
-                hasScanned.current = true;
-                log.info('QR scanned successfully');
-                setScannedRoomId(result.roomId);
-              }
-            },
-          }}
-        />
+      {permissionStatus === 'granted' ? (
+        <QRScanner onScanned={(roomId) => setScannedRoomId(roomId)} />
       ) : (
         <View style={styles.content}>
           <Text style={styles.status}>Loading camera...</Text>
