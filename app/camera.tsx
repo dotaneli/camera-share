@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import QRCode from 'react-native-qrcode-svg';
+// Lazy import to avoid crash from expo-router eagerly loading all routes
+const QRCode = require('react-native-qrcode-svg').default;
 import { useAppStore } from '../lib/store';
 import { generateRoomId, deriveNumericCode, encodeQRPayload } from '../lib/pairing';
 import log from '../lib/logger';

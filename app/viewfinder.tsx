@@ -2,10 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View, Pressable, TextInput, Alert, Linking } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Camera, useCameraDevice, useCodeScanner, type Code } from 'react-native-vision-camera';
 import { decodeQRPayload } from '../lib/pairing';
 import { useAppStore } from '../lib/store';
 import log from '../lib/logger';
+
+// Lazy import to avoid crash from expo-router eagerly loading all routes
+const VisionCamera = require('react-native-vision-camera') as typeof import('react-native-vision-camera');
 
 export default function ViewfinderScreen() {
   const router = useRouter();
@@ -17,16 +19,16 @@ export default function ViewfinderScreen() {
   const [permissionStatus, setPermissionStatus] = useState<string>('unknown');
   const hasScanned = useRef(false);
 
-  const device = useCameraDevice('back');
+  const device = VisionCamera.useCameraDevice('back');
 
   // Request camera permission on mount
   useEffect(() => {
     (async () => {
-      const status = await Camera.getCameraPermissionStatus();
+      const status = await VisionCamera.Camera.getCameraPermissionStatus();
       if (status === 'granted') {
         setPermissionStatus('granted');
       } else {
-        const result = await Camera.requestCameraPermission();
+        const result = await VisionCamera.Camera.requestCameraPermission();
         setPermissionStatus(result);
         if (result !== 'granted') {
           log.warn('Camera permission denied');
@@ -35,9 +37,9 @@ export default function ViewfinderScreen() {
     })();
   }, []);
 
-  const codeScanner = useCodeScanner({
+  const codeScanner = VisionCamera.useCodeScanner({
     codeTypes: ['qr'],
-    onCodeScanned: useCallback((codes: Code[]) => {
+    onCodeScanned: useCallback((codes: any[]) => {
       if (hasScanned.current) return;
       const qrValue = codes[0]?.value;
       if (!qrValue) return;
@@ -169,13 +171,14 @@ export default function ViewfinderScreen() {
       </View>
 
       {device && permissionStatus === 'granted' ? (
-        <Camera
+        <VisionCamera.Camera
           style={StyleSheet.absoluteFill}
           device={device}
           isActive={true}
           codeScanner={codeScanner}
         />
       ) : (
+
         <View style={styles.content}>
           <Text style={styles.status}>Loading camera...</Text>
         </View>
