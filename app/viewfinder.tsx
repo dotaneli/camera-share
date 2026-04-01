@@ -1,8 +1,8 @@
-import { useCallback, useState } from 'react';
-import { StyleSheet, Text, View, Pressable, TextInput, Alert } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { StyleSheet, Text, View, Pressable, TextInput, Alert, Linking } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Camera, useCameraDevice, useCodeScanner } from 'react-native-vision-camera';
+import { Camera, useCameraDevice, useCodeScanner, type Code } from 'react-native-vision-camera';
 import { decodeQRPayload } from '../lib/pairing';
 import { useAppStore } from '../lib/store';
 import log from '../lib/logger';
@@ -14,22 +14,41 @@ export default function ViewfinderScreen() {
   const [scannedRoomId, setScannedRoomId] = useState<string | null>(null);
   const [manualCode, setManualCode] = useState('');
   const [showManualEntry, setShowManualEntry] = useState(false);
+  const [permissionStatus, setPermissionStatus] = useState<string>('unknown');
+  const hasScanned = useRef(false);
 
   const device = useCameraDevice('back');
 
+  // Request camera permission on mount
+  useEffect(() => {
+    (async () => {
+      const status = await Camera.getCameraPermissionStatus();
+      if (status === 'granted') {
+        setPermissionStatus('granted');
+      } else {
+        const result = await Camera.requestCameraPermission();
+        setPermissionStatus(result);
+        if (result !== 'granted') {
+          log.warn('Camera permission denied');
+        }
+      }
+    })();
+  }, []);
+
   const codeScanner = useCodeScanner({
     codeTypes: ['qr'],
-    onCodeScanned: useCallback((codes: any[]) => {
-      if (scannedRoomId) return; // Already scanned
+    onCodeScanned: useCallback((codes: Code[]) => {
+      if (hasScanned.current) return;
       const qrValue = codes[0]?.value;
       if (!qrValue) return;
 
       const result = decodeQRPayload(qrValue);
       if (result) {
-        log.info(`QR scanned — room: ${result.roomId}`);
+        hasScanned.current = true;
+        log.info('QR scanned successfully');
         setScannedRoomId(result.roomId);
       }
-    }, [scannedRoomId]),
+    }, []),
   });
 
   const handleBack = () => {
@@ -40,21 +59,52 @@ export default function ViewfinderScreen() {
 
   const handleManualSubmit = () => {
     if (manualCode.length === 6) {
-      log.info(`Manual code entered: ${manualCode}`);
-      // For now, just show the code was entered. Firebase lookup comes in M3.
-      setScannedRoomId(`manual-${manualCode}`);
+      log.info('Manual code entered');
+      // Stub: manual code lookup requires Firebase (M3)
+      Alert.alert(
+        'Coming soon',
+        'Manual code entry will work after Firebase is connected (Milestone 3).',
+      );
     } else {
       Alert.alert('Invalid code', 'Please enter the 6-digit code from the Camera phone.');
     }
   };
 
   const handleReset = () => {
+    hasScanned.current = false;
     setScannedRoomId(null);
     setManualCode('');
     setShowManualEntry(false);
   };
 
-  // Scanned successfully — show result
+  const handleOpenSettings = () => {
+    Linking.openSettings();
+  };
+
+  // Permission denied
+  if (permissionStatus === 'denied') {
+    return (
+      <View style={styles.container}>
+        <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
+          <Pressable onPress={handleBack} style={styles.backButton} accessibilityLabel="Go back" accessibilityRole="button">
+            <Text style={styles.backText}>← Back</Text>
+          </Pressable>
+        </View>
+        <View style={styles.content}>
+          <Text style={styles.errorText}>Camera access needed</Text>
+          <Text style={styles.permissionHint}>CameraShare needs camera access to scan QR codes from the Camera phone.</Text>
+          <Pressable onPress={handleOpenSettings} style={styles.settingsButton}>
+            <Text style={styles.settingsText}>Open Settings</Text>
+          </Pressable>
+          <Pressable onPress={() => setShowManualEntry(true)} style={styles.manualButton}>
+            <Text style={styles.manualText}>Enter code manually instead</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  // Scanned successfully
   if (scannedRoomId) {
     return (
       <View style={styles.container}>
@@ -65,7 +115,7 @@ export default function ViewfinderScreen() {
         </View>
         <View style={styles.content}>
           <Text style={styles.successIcon}>✓</Text>
-          <Text style={styles.successText}>Room found!</Text>
+          <Text style={styles.successText}>QR Code Scanned!</Text>
           <Text style={styles.roomIdText}>{scannedRoomId.substring(0, 12)}...</Text>
           <Text style={styles.status}>Connecting... (Firebase coming in M3)</Text>
           <Pressable onPress={handleReset} style={styles.resetButton}>
@@ -118,7 +168,7 @@ export default function ViewfinderScreen() {
         </Pressable>
       </View>
 
-      {device ? (
+      {device && permissionStatus === 'granted' ? (
         <Camera
           style={StyleSheet.absoluteFill}
           device={device}
@@ -127,11 +177,12 @@ export default function ViewfinderScreen() {
         />
       ) : (
         <View style={styles.content}>
-          <Text style={styles.errorText}>No camera available</Text>
+          <Text style={styles.status}>Loading camera...</Text>
         </View>
       )}
 
       <View style={[styles.overlay, { paddingBottom: insets.bottom + 24 }]}>
+        <View style={styles.scanFrame} />
         <Text style={styles.scanText}>Point at the QR code on the Camera phone</Text>
         <Pressable onPress={() => setShowManualEntry(true)} style={styles.manualButton}>
           <Text style={styles.manualText}>Enter code manually</Text>
@@ -174,6 +225,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 24,
     backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+  scanFrame: {
+    width: 200,
+    height: 200,
+    borderWidth: 2,
+    borderColor: '#4aff9e',
+    borderRadius: 16,
+    marginBottom: 16,
+    position: 'absolute',
+    top: -240,
+    alignSelf: 'center',
   },
   scanText: {
     color: '#fff',
@@ -259,6 +321,27 @@ const styles = StyleSheet.create({
   },
   errorText: {
     color: '#ff4a4a',
+    fontSize: 22,
+    fontWeight: 'bold',
+    marginBottom: 12,
+  },
+  permissionHint: {
+    color: '#999',
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 24,
+    paddingHorizontal: 32,
+  },
+  settingsButton: {
+    backgroundColor: '#4aff9e',
+    paddingHorizontal: 32,
+    paddingVertical: 14,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+  settingsText: {
+    color: '#000',
     fontSize: 16,
+    fontWeight: '600',
   },
 });

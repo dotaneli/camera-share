@@ -14,7 +14,10 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.dotaneli.camerashare"
+      "bundleIdentifier": "com.dotaneli.camerashare",
+      "infoPlist": {
+        "NSCameraUsageDescription": "CameraShare needs camera access to scan QR codes and take photos"
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -22,7 +25,8 @@
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.dotaneli.camerashare"
+      "package": "com.dotaneli.camerashare",
+      "permissions": ["android.permission.CAMERA"]
     },
     "extra": {
       "eas": {
