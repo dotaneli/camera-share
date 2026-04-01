@@ -6,8 +6,8 @@ import { decodeQRPayload } from '../lib/pairing';
 import { useAppStore } from '../lib/store';
 import log from '../lib/logger';
 
-// Lazy import to avoid crash from expo-router eagerly loading all routes
-const VisionCamera = require('react-native-vision-camera') as typeof import('react-native-vision-camera');
+// Loaded lazily in useEffect to avoid expo-router eager import crash
+let VisionCamera: any = null;
 
 export default function ViewfinderScreen() {
   const router = useRouter();
@@ -17,13 +17,15 @@ export default function ViewfinderScreen() {
   const [manualCode, setManualCode] = useState('');
   const [showManualEntry, setShowManualEntry] = useState(false);
   const [permissionStatus, setPermissionStatus] = useState<string>('unknown');
+  const [cameraReady, setCameraReady] = useState(false);
   const hasScanned = useRef(false);
 
-  const device = VisionCamera.useCameraDevice('back');
-
-  // Request camera permission on mount
+  // Lazy load vision-camera and request permissions
   useEffect(() => {
     (async () => {
+      VisionCamera = require('react-native-vision-camera');
+      setCameraReady(true);
+
       const status = await VisionCamera.Camera.getCameraPermissionStatus();
       if (status === 'granted') {
         setPermissionStatus('granted');
@@ -37,22 +39,6 @@ export default function ViewfinderScreen() {
     })();
   }, []);
 
-  const codeScanner = VisionCamera.useCodeScanner({
-    codeTypes: ['qr'],
-    onCodeScanned: useCallback((codes: any[]) => {
-      if (hasScanned.current) return;
-      const qrValue = codes[0]?.value;
-      if (!qrValue) return;
-
-      const result = decodeQRPayload(qrValue);
-      if (result) {
-        hasScanned.current = true;
-        log.info('QR scanned successfully');
-        setScannedRoomId(result.roomId);
-      }
-    }, []),
-  });
-
   const handleBack = () => {
     log.info('Leaving viewfinder mode');
     resetRole();
@@ -62,7 +48,6 @@ export default function ViewfinderScreen() {
   const handleManualSubmit = () => {
     if (manualCode.length === 6) {
       log.info('Manual code entered');
-      // Stub: manual code lookup requires Firebase (M3)
       Alert.alert(
         'Coming soon',
         'Manual code entry will work after Firebase is connected (Milestone 3).',
@@ -162,6 +147,9 @@ export default function ViewfinderScreen() {
   }
 
   // QR Scanner view
+  const CameraComponent = cameraReady ? VisionCamera.Camera : null;
+  const device = cameraReady ? VisionCamera.useCameraDevice?.('back') : null;
+
   return (
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + 12, position: 'absolute', zIndex: 10, left: 0, right: 0 }]}>
@@ -170,22 +158,33 @@ export default function ViewfinderScreen() {
         </Pressable>
       </View>
 
-      {device && permissionStatus === 'granted' ? (
-        <VisionCamera.Camera
+      {CameraComponent && device && permissionStatus === 'granted' ? (
+        <CameraComponent
           style={StyleSheet.absoluteFill}
           device={device}
           isActive={true}
-          codeScanner={codeScanner}
+          codeScanner={{
+            codeTypes: ['qr'],
+            onCodeScanned: (codes: any[]) => {
+              if (hasScanned.current) return;
+              const qrValue = codes[0]?.value;
+              if (!qrValue) return;
+              const result = decodeQRPayload(qrValue);
+              if (result) {
+                hasScanned.current = true;
+                log.info('QR scanned successfully');
+                setScannedRoomId(result.roomId);
+              }
+            },
+          }}
         />
       ) : (
-
         <View style={styles.content}>
           <Text style={styles.status}>Loading camera...</Text>
         </View>
       )}
 
       <View style={[styles.overlay, { paddingBottom: insets.bottom + 24 }]}>
-        <View style={styles.scanFrame} />
         <Text style={styles.scanText}>Point at the QR code on the Camera phone</Text>
         <Pressable onPress={() => setShowManualEntry(true)} style={styles.manualButton}>
           <Text style={styles.manualText}>Enter code manually</Text>
@@ -228,17 +227,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 24,
     backgroundColor: 'rgba(0,0,0,0.6)',
-  },
-  scanFrame: {
-    width: 200,
-    height: 200,
-    borderWidth: 2,
-    borderColor: '#4aff9e',
-    borderRadius: 16,
-    marginBottom: 16,
-    position: 'absolute',
-    top: -240,
-    alignSelf: 'center',
   },
   scanText: {
     color: '#fff',

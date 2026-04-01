@@ -2,11 +2,11 @@ import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-// Lazy import to avoid crash from expo-router eagerly loading all routes
-const QRCode = require('react-native-qrcode-svg').default;
 import { useAppStore } from '../lib/store';
 import { generateRoomId, deriveNumericCode, encodeQRPayload } from '../lib/pairing';
 import log from '../lib/logger';
+
+let QRCode: any = null;
 
 export default function CameraScreen() {
   const router = useRouter();
@@ -15,13 +15,18 @@ export default function CameraScreen() {
   const [roomId, setRoomId] = useState<string>('');
   const [numericCode, setNumericCode] = useState<string>('');
   const [qrPayload, setQrPayload] = useState<string>('');
+  const [qrReady, setQrReady] = useState(false);
 
   useEffect(() => {
+    // Lazy load QR code component
+    QRCode = require('react-native-qrcode-svg').default;
+    setQrReady(true);
+
     const id = generateRoomId();
     setRoomId(id);
     setNumericCode(deriveNumericCode(id));
     setQrPayload(encodeQRPayload(id));
-    log.info(`Room created: ${id}`);
+    log.info('Room created');
   }, []);
 
   const handleBack = () => {
@@ -42,7 +47,7 @@ export default function CameraScreen() {
       <View style={styles.content}>
         <Text style={styles.instruction}>Scan this with the Viewfinder phone</Text>
 
-        {qrPayload ? (
+        {qrReady && qrPayload && QRCode ? (
           <View style={styles.qrContainer}>
             <QRCode
               value={qrPayload}
