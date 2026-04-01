@@ -38,7 +38,8 @@
     },
     "scheme": "camerashare",
     "plugins": [
-      "expo-router"
+      "expo-router",
+      "react-native-vision-camera"
     ]
   }
 }
