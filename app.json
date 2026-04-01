@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "CameraShare",
+    "slug": "camera-share",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#000000"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.dotaneli.camerashare"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#000000"
+      },
+      "edgeToEdgeEnabled": true,
+      "package": "com.dotaneli.camerashare"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "7eb802db-880d-4d33-bc5c-8391f630fab8"
+      }
+    },
+    "owner": "dotaneli"
+  }
+}
