@@ -12,10 +12,10 @@
 - [x] **M1: Role selection** — Buttons + navigation + audit fixes. ✅ Confirmed on device.
 - [x] **M2: QR pairing UI** — QR display + scan + manual code entry. ✅ Working on device. Camera + viewfinder both functional.
 - [x] **M3: Firebase signaling** — Room create/join, anonymous auth, real-time status. ✅ Cross-platform confirmed.
-- [ ] **M4: WebRTC streaming** — Live video from camera to viewfinder. (needs build — native dep)
-- [ ] **M5: Remote shutter** — Tap to capture full-res photo. (OTA)
+- [x] **M4: WebRTC streaming** — Live video working! ICE connected, remote track received. ✅
+- [ ] **M5: Remote shutter + video** — Capture photo + record video from viewfinder. Camera PiP preview. (OTA) ← NEXT
 - [ ] **M6: Photo transfer** — Full-res photo to viewfinder phone. (OTA)
-- [ ] **M7: Resilience** — Auto-reconnect, heartbeat, lifecycle handling. (OTA) **= MVP DONE**
+- [ ] **M7: Resilience** — Mutual disconnect, auto-reconnect, heartbeat, quality indicator. (OTA) **= MVP DONE**
 
 ## Completed
 - [x] Product & technical plan
