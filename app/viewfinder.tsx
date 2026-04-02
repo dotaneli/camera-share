@@ -7,6 +7,8 @@ import { useAppStore } from '../lib/store';
 import log from '../lib/logger';
 import { rlog } from '../lib/remote-logger';
 import { joinRoom, lookupNumericCode } from '../lib/firebase';
+import { startAsViewfinder, cleanupWebRTC } from '../lib/webrtc';
+import { RTCView } from 'react-native-webrtc';
 
 // Separate component for the camera — only rendered after lazy load
 function QRScanner({ onScanned }: { onScanned: (roomId: string) => void }) {
@@ -71,7 +73,8 @@ export default function ViewfinderScreen() {
   const insets = useSafeAreaInsets();
   const resetRole = useAppStore((s) => s.resetRole);
   const [scannedRoomId, setScannedRoomId] = useState<string | null>(null);
-  const [joinStatus, setJoinStatus] = useState<'idle' | 'joining' | 'joined' | 'failed'>('idle');
+  const [joinStatus, setJoinStatus] = useState<'idle' | 'joining' | 'joined' | 'streaming' | 'failed'>('idle');
+  const [remoteStreamUrl, setRemoteStreamUrl] = useState<string | null>(null);
   const [manualCode, setManualCode] = useState('');
   const [showManualEntry, setShowManualEntry] = useState(false);
   const [permissionStatus, setPermissionStatus] = useState<string>('unknown');
@@ -102,7 +105,23 @@ export default function ViewfinderScreen() {
     setJoinStatus('joining');
     rlog.info('viewfinder', 'Attempting to join room');
     const success = await joinRoom(roomId);
-    setJoinStatus(success ? 'joined' : 'failed');
+    if (!success) {
+      setJoinStatus('failed');
+      return;
+    }
+    setJoinStatus('joined');
+
+    // Start WebRTC — receive video from camera
+    try {
+      rlog.info('viewfinder', 'Starting WebRTC as viewfinder');
+      await startAsViewfinder(roomId, (stream) => {
+        rlog.info('viewfinder', 'Remote stream received!');
+        setRemoteStreamUrl((stream as any).toURL());
+        setJoinStatus('streaming');
+      });
+    } catch (e: any) {
+      rlog.fatal('viewfinder', 'WebRTC start failed', { error: e?.message });
+    }
   };
 
   const handleBack = () => {
@@ -159,11 +178,34 @@ export default function ViewfinderScreen() {
     );
   }
 
-  // Scanned / joined
+  // Streaming — show live video
+  if (scannedRoomId && joinStatus === 'streaming' && remoteStreamUrl) {
+    return (
+      <View style={styles.container}>
+        <RTCView
+          streamURL={remoteStreamUrl}
+          style={StyleSheet.absoluteFill}
+          objectFit="cover"
+          mirror={false}
+        />
+        <View style={[styles.header, { paddingTop: insets.top + 12, position: 'absolute', zIndex: 10, left: 0, right: 0 }]}>
+          <Pressable onPress={() => { cleanupWebRTC(scannedRoomId); handleBack(); }} style={styles.backButton} accessibilityLabel="Disconnect" accessibilityRole="button">
+            <Text style={styles.backText}>← Disconnect</Text>
+          </Pressable>
+          <View style={styles.liveBadge}>
+            <Text style={styles.liveText}>● LIVE</Text>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
+  // Scanned / joining / joined (waiting for stream)
   if (scannedRoomId) {
     const statusMsg = {
       joining: 'Joining room...',
-      joined: 'Connected to Camera phone!',
+      joined: 'Connected — waiting for video...',
+      streaming: 'Streaming',
       failed: 'Failed to join room',
       idle: '',
     }[joinStatus];
@@ -172,19 +214,18 @@ export default function ViewfinderScreen() {
     return (
       <View style={styles.container}>
         <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-          <Pressable onPress={handleBack} style={styles.backButton} accessibilityLabel="Go back" accessibilityRole="button">
+          <Pressable onPress={() => { cleanupWebRTC(scannedRoomId); handleBack(); }} style={styles.backButton} accessibilityLabel="Go back" accessibilityRole="button">
             <Text style={styles.backText}>← Back</Text>
           </Pressable>
         </View>
         <View style={styles.content}>
-          <Text style={styles.successIcon}>{joinStatus === 'joined' ? '✓' : joinStatus === 'failed' ? '✗' : '⋯'}</Text>
+          <Text style={styles.successIcon}>{joinStatus === 'joined' ? '⋯' : joinStatus === 'failed' ? '✗' : '⋯'}</Text>
           <Text style={[styles.successText, { color: statusClr }]}>{statusMsg}</Text>
-          {joinStatus === 'joined' && (
-            <Text style={styles.status}>WebRTC streaming coming in M4</Text>
+          {joinStatus === 'failed' && (
+            <Pressable onPress={handleReset} style={styles.resetButton}>
+              <Text style={styles.resetText}>Try again</Text>
+            </Pressable>
           )}
-          <Pressable onPress={handleReset} style={styles.resetButton}>
-            <Text style={styles.resetText}>{joinStatus === 'failed' ? 'Try again' : 'Scan again'}</Text>
-          </Pressable>
         </View>
       </View>
     );
@@ -390,5 +431,18 @@ const styles = StyleSheet.create({
     color: '#000',
     fontSize: 16,
     fontWeight: '600',
+  },
+  liveBadge: {
+    backgroundColor: 'rgba(255,0,0,0.8)',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 8,
+    marginLeft: 'auto',
+    marginRight: 20,
+  },
+  liveText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
 });

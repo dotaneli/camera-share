@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppStore } from '../lib/store';
 import { generateRoomId, deriveNumericCode, encodeQRPayload } from '../lib/pairing';
 import { createRoom, deleteRoom, onRoomStatusChange } from '../lib/firebase';
+import { startAsCamera, cleanupWebRTC } from '../lib/webrtc';
 import { rlog } from '../lib/remote-logger';
 
 let QRCode: any = null;
@@ -18,6 +19,7 @@ export default function CameraScreen() {
   const [qrPayload, setQrPayload] = useState<string>('');
   const [qrReady, setQrReady] = useState(false);
   const [roomStatus, setRoomStatus] = useState<string>('creating');
+  const [streaming, setStreaming] = useState(false);
 
   useEffect(() => {
     rlog.info('camera', 'CameraScreen mounted');
@@ -40,16 +42,24 @@ export default function CameraScreen() {
       setRoomStatus(success ? 'waiting' : 'error');
     });
 
-    // Listen for viewfinder joining
-    const unsubscribe = onRoomStatusChange(id, (status) => {
+    // Listen for viewfinder joining, then start WebRTC
+    const unsubscribe = onRoomStatusChange(id, async (status) => {
       setRoomStatus(status);
       if (status === 'paired') {
-        rlog.info('camera', 'Viewfinder connected!');
+        rlog.info('camera', 'Viewfinder connected — starting WebRTC');
+        try {
+          await startAsCamera(id);
+          setStreaming(true);
+          rlog.info('camera', 'WebRTC streaming started');
+        } catch (e: any) {
+          rlog.fatal('camera', 'WebRTC start failed', { error: e?.message });
+        }
       }
     });
 
     return () => {
       unsubscribe();
+      cleanupWebRTC(id);
       deleteRoom(id, code);
     };
   }, []);
@@ -60,15 +70,17 @@ export default function CameraScreen() {
     router.back();
   };
 
-  const statusText = {
-    creating: 'Creating room...',
-    waiting: 'Waiting for viewfinder to connect...',
-    paired: 'Viewfinder connected!',
-    closed: 'Room closed',
-    error: 'Failed to create room',
-  }[roomStatus] ?? roomStatus;
+  const statusText = streaming
+    ? 'Streaming live to viewfinder'
+    : {
+        creating: 'Creating room...',
+        waiting: 'Waiting for viewfinder to connect...',
+        paired: 'Starting video stream...',
+        closed: 'Room closed',
+        error: 'Failed to create room',
+      }[roomStatus] ?? roomStatus;
 
-  const statusColor = roomStatus === 'paired' ? '#4aff9e' : roomStatus === 'error' ? '#ff4a4a' : '#666';
+  const statusColor = streaming ? '#4aff9e' : roomStatus === 'paired' ? '#4a9eff' : roomStatus === 'error' ? '#ff4a4a' : '#666';
 
   return (
     <View style={styles.container}>
