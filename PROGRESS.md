@@ -2,16 +2,16 @@
 
 ## Current: Milestone 0.5 (Logging) + Milestone 1 (Role Selection)
 
-## EAS Build Count: 6 / 30 (free tier monthly limit, resets monthly)
+## EAS Build Count: 9 Android + 2 iOS / 30 (free tier monthly limit, resets monthly)
 ## Deploy method: `eas update --branch preview` (free, unlimited, ~30s)
 
 ## Milestones
 
 - [x] **M0: Empty shell** — Preview APK on phone. ✅
-- [x] **M0.5: Logging** — Structured logger (react-native-logs). ✅
+- [x] **M0.5: Logging** — Firebase RTDB remote logger + crash handlers + breadcrumbs. ✅ Live observability confirmed.
 - [x] **M1: Role selection** — Buttons + navigation + audit fixes. ✅ Confirmed on device.
-- [x] **M2: QR pairing UI** — QR display + scan + manual code entry. ✅ Audit fixed. Build in progress.
-- [ ] **M3: Firebase signaling** — Room creation, joining, message exchange. (needs build — native dep)
+- [x] **M2: QR pairing UI** — QR display + scan + manual code entry. ✅ Working on device. Camera + viewfinder both functional.
+- [ ] **M3: Firebase signaling** — Room creation, joining, message exchange. ← NEXT
 - [ ] **M4: WebRTC streaming** — Live video from camera to viewfinder. (needs build — native dep)
 - [ ] **M5: Remote shutter** — Tap to capture full-res photo. (OTA)
 - [ ] **M6: Photo transfer** — Full-res photo to viewfinder phone. (OTA)
