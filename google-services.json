@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "569878694054",
+    "firebase_url": "https://camera-share-e9232-default-rtdb.firebaseio.com",
+    "project_id": "camera-share-e9232",
+    "storage_bucket": "camera-share-e9232.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:569878694054:android:41f13f1f421a52b272cc67",
+        "android_client_info": {
+          "package_name": "com.dotaneli.camerashare"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB-6O8FgDzzu5VYIjGxYs9PAvLF631b37A"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

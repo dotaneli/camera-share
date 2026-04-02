@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppStore } from '../lib/store';
 import { generateRoomId, deriveNumericCode, encodeQRPayload } from '../lib/pairing';
-import log from '../lib/logger';
+import { createRoom, deleteRoom, onRoomStatusChange } from '../lib/firebase';
 import { rlog } from '../lib/remote-logger';
 
 let QRCode: any = null;
@@ -17,6 +17,7 @@ export default function CameraScreen() {
   const [numericCode, setNumericCode] = useState<string>('');
   const [qrPayload, setQrPayload] = useState<string>('');
   const [qrReady, setQrReady] = useState(false);
+  const [roomStatus, setRoomStatus] = useState<string>('creating');
 
   useEffect(() => {
     rlog.info('camera', 'CameraScreen mounted');
@@ -29,17 +30,45 @@ export default function CameraScreen() {
     }
 
     const id = generateRoomId();
+    const code = deriveNumericCode(id);
     setRoomId(id);
-    setNumericCode(deriveNumericCode(id));
+    setNumericCode(code);
     setQrPayload(encodeQRPayload(id));
-    rlog.info('camera', 'Room created');
+
+    // Create room in Firebase
+    createRoom(id, code).then((success) => {
+      setRoomStatus(success ? 'waiting' : 'error');
+    });
+
+    // Listen for viewfinder joining
+    const unsubscribe = onRoomStatusChange(id, (status) => {
+      setRoomStatus(status);
+      if (status === 'paired') {
+        rlog.info('camera', 'Viewfinder connected!');
+      }
+    });
+
+    return () => {
+      unsubscribe();
+      deleteRoom(id, code);
+    };
   }, []);
 
   const handleBack = () => {
-    log.info('Leaving camera mode');
+    rlog.info('camera', 'Leaving camera mode');
     resetRole();
     router.back();
   };
+
+  const statusText = {
+    creating: 'Creating room...',
+    waiting: 'Waiting for viewfinder to connect...',
+    paired: 'Viewfinder connected!',
+    closed: 'Room closed',
+    error: 'Failed to create room',
+  }[roomStatus] ?? roomStatus;
+
+  const statusColor = roomStatus === 'paired' ? '#4aff9e' : roomStatus === 'error' ? '#ff4a4a' : '#666';
 
   return (
     <View style={styles.container}>
@@ -70,7 +99,7 @@ export default function CameraScreen() {
           <Text style={styles.numericCode}>{numericCode}</Text>
         </View>
 
-        <Text style={styles.status}>Waiting for viewfinder to connect...</Text>
+        <Text style={[styles.status, { color: statusColor }]}>{statusText}</Text>
       </View>
     </View>
   );
@@ -139,7 +168,7 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   status: {
-    color: '#666',
-    fontSize: 14,
+    fontSize: 16,
+    fontWeight: '500',
   },
 });

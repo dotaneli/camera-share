@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { rlog } from '../lib/remote-logger';
+import { initAuth } from '../lib/firebase';
 
 // === CRASH HANDLERS — runs BEFORE any component renders ===
 
@@ -38,6 +39,7 @@ rlog.info('app', 'JS runtime started — _layout.tsx executing');
 export default function RootLayout() {
   useEffect(() => {
     rlog.info('app', 'RootLayout mounted — app is rendering');
+    initAuth();
   }, []);
 
   return (

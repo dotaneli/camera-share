@@ -6,6 +6,7 @@ import { decodeQRPayload } from '../lib/pairing';
 import { useAppStore } from '../lib/store';
 import log from '../lib/logger';
 import { rlog } from '../lib/remote-logger';
+import { joinRoom, lookupNumericCode } from '../lib/firebase';
 
 // Separate component for the camera — only rendered after lazy load
 function QRScanner({ onScanned }: { onScanned: (roomId: string) => void }) {
@@ -70,6 +71,7 @@ export default function ViewfinderScreen() {
   const insets = useSafeAreaInsets();
   const resetRole = useAppStore((s) => s.resetRole);
   const [scannedRoomId, setScannedRoomId] = useState<string | null>(null);
+  const [joinStatus, setJoinStatus] = useState<'idle' | 'joining' | 'joined' | 'failed'>('idle');
   const [manualCode, setManualCode] = useState('');
   const [showManualEntry, setShowManualEntry] = useState(false);
   const [permissionStatus, setPermissionStatus] = useState<string>('unknown');
@@ -95,19 +97,29 @@ export default function ViewfinderScreen() {
     })();
   }, []);
 
+  const handleJoinRoom = async (roomId: string) => {
+    setScannedRoomId(roomId);
+    setJoinStatus('joining');
+    rlog.info('viewfinder', 'Attempting to join room');
+    const success = await joinRoom(roomId);
+    setJoinStatus(success ? 'joined' : 'failed');
+  };
+
   const handleBack = () => {
-    log.info('Leaving viewfinder mode');
+    rlog.info('viewfinder', 'Leaving viewfinder mode');
     resetRole();
     router.back();
   };
 
-  const handleManualSubmit = () => {
+  const handleManualSubmit = async () => {
     if (manualCode.length === 6) {
-      log.info('Manual code entered');
-      Alert.alert(
-        'Coming soon',
-        'Manual code entry will work after Firebase is connected (Milestone 3).',
-      );
+      rlog.info('viewfinder', 'Looking up numeric code');
+      const roomId = await lookupNumericCode(manualCode);
+      if (roomId) {
+        handleJoinRoom(roomId);
+      } else {
+        Alert.alert('Code not found', 'No room found for this code. Make sure the Camera phone is showing the code.');
+      }
     } else {
       Alert.alert('Invalid code', 'Please enter the 6-digit code from the Camera phone.');
     }
@@ -115,6 +127,7 @@ export default function ViewfinderScreen() {
 
   const handleReset = () => {
     setScannedRoomId(null);
+    setJoinStatus('idle');
     setManualCode('');
     setShowManualEntry(false);
   };
@@ -146,8 +159,16 @@ export default function ViewfinderScreen() {
     );
   }
 
-  // Scanned successfully
+  // Scanned / joined
   if (scannedRoomId) {
+    const statusMsg = {
+      joining: 'Joining room...',
+      joined: 'Connected to Camera phone!',
+      failed: 'Failed to join room',
+      idle: '',
+    }[joinStatus];
+    const statusClr = joinStatus === 'joined' ? '#4aff9e' : joinStatus === 'failed' ? '#ff4a4a' : '#666';
+
     return (
       <View style={styles.container}>
         <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
@@ -156,12 +177,13 @@ export default function ViewfinderScreen() {
           </Pressable>
         </View>
         <View style={styles.content}>
-          <Text style={styles.successIcon}>✓</Text>
-          <Text style={styles.successText}>QR Code Scanned!</Text>
-          <Text style={styles.roomIdText}>{scannedRoomId.substring(0, 12)}...</Text>
-          <Text style={styles.status}>Connecting... (Firebase coming in M3)</Text>
+          <Text style={styles.successIcon}>{joinStatus === 'joined' ? '✓' : joinStatus === 'failed' ? '✗' : '⋯'}</Text>
+          <Text style={[styles.successText, { color: statusClr }]}>{statusMsg}</Text>
+          {joinStatus === 'joined' && (
+            <Text style={styles.status}>WebRTC streaming coming in M4</Text>
+          )}
           <Pressable onPress={handleReset} style={styles.resetButton}>
-            <Text style={styles.resetText}>Scan again</Text>
+            <Text style={styles.resetText}>{joinStatus === 'failed' ? 'Try again' : 'Scan again'}</Text>
           </Pressable>
         </View>
       </View>
@@ -211,7 +233,7 @@ export default function ViewfinderScreen() {
       </View>
 
       {permissionStatus === 'granted' ? (
-        <QRScanner onScanned={(roomId) => setScannedRoomId(roomId)} />
+        <QRScanner onScanned={(roomId) => handleJoinRoom(roomId)} />
       ) : (
         <View style={styles.content}>
           <Text style={styles.status}>Loading camera...</Text>
