@@ -15,6 +15,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.dotaneli.camerashare",
+      "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "NSCameraUsageDescription": "CameraShare needs camera access to scan QR codes and take photos"
       }
@@ -26,6 +27,7 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "com.dotaneli.camerashare",
+      "googleServicesFile": "./google-services.json",
       "permissions": [
         "android.permission.CAMERA"
       ]
