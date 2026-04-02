@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppStore } from '../lib/store';
 import { generateRoomId, deriveNumericCode, encodeQRPayload } from '../lib/pairing';
 import log from '../lib/logger';
+import { rlog } from '../lib/remote-logger';
 
 let QRCode: any = null;
 
@@ -18,15 +19,20 @@ export default function CameraScreen() {
   const [qrReady, setQrReady] = useState(false);
 
   useEffect(() => {
-    // Lazy load QR code component
-    QRCode = require('react-native-qrcode-svg').default;
-    setQrReady(true);
+    rlog.info('camera', 'CameraScreen mounted');
+    try {
+      QRCode = require('react-native-qrcode-svg').default;
+      rlog.info('camera', 'QR library loaded');
+      setQrReady(true);
+    } catch (e: any) {
+      rlog.fatal('camera', 'QR library failed', { error: e?.message });
+    }
 
     const id = generateRoomId();
     setRoomId(id);
     setNumericCode(deriveNumericCode(id));
     setQrPayload(encodeQRPayload(id));
-    log.info('Room created');
+    rlog.info('camera', 'Room created');
   }, []);
 
   const handleBack = () => {

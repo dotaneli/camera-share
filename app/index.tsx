@@ -2,13 +2,16 @@ import { StyleSheet, Text, View, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAppStore } from '../lib/store';
 import log from '../lib/logger';
+import { rlog } from '../lib/remote-logger';
 
 export default function RoleSelectScreen() {
   const router = useRouter();
   const setRole = useAppStore((s) => s.setRole);
 
+  rlog.info('app', 'RoleSelectScreen rendering');
+
   const handleRole = (role: 'camera' | 'viewfinder') => {
-    log.info(`Role selected: ${role}`);
+    rlog.info('app', `Role selected: ${role}`);
     setRole(role);
     router.push(`/${role}`);
   };

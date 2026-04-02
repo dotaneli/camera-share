@@ -5,11 +5,29 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { decodeQRPayload } from '../lib/pairing';
 import { useAppStore } from '../lib/store';
 import log from '../lib/logger';
+import { rlog } from '../lib/remote-logger';
 
 // Separate component for the camera — only rendered after lazy load
 function QRScanner({ onScanned }: { onScanned: (roomId: string) => void }) {
-  const { Camera, useCameraDevice, useCodeScanner } = require('react-native-vision-camera');
+  rlog.info('viewfinder', 'QRScanner: requiring vision-camera');
+  let VisionCameraModule: any;
+  try {
+    VisionCameraModule = require('react-native-vision-camera');
+    rlog.info('viewfinder', 'QRScanner: require succeeded', { keys: Object.keys(VisionCameraModule).join(',') });
+  } catch (e: any) {
+    rlog.fatal('viewfinder', 'QRScanner: require FAILED', { error: e?.message });
+    return (
+      <View style={styles.content}>
+        <Text style={styles.errorText}>Camera module failed to load</Text>
+        <Text style={styles.status}>{e?.message}</Text>
+      </View>
+    );
+  }
+
+  const { Camera, useCameraDevice, useCodeScanner } = VisionCameraModule;
+  rlog.info('viewfinder', 'QRScanner: calling useCameraDevice');
   const device = useCameraDevice('back');
+  rlog.info('viewfinder', 'QRScanner: device result', { hasDevice: !!device });
   const hasScanned = useRef(false);
 
   const codeScanner = useCodeScanner({
@@ -21,13 +39,14 @@ function QRScanner({ onScanned }: { onScanned: (roomId: string) => void }) {
       const result = decodeQRPayload(qrValue);
       if (result) {
         hasScanned.current = true;
-        log.info('QR scanned successfully');
+        rlog.info('viewfinder', 'QR scanned successfully');
         onScanned(result.roomId);
       }
     },
   });
 
   if (!device) {
+    rlog.warn('viewfinder', 'QRScanner: no camera device found');
     return (
       <View style={styles.content}>
         <Text style={styles.status}>No camera found</Text>
@@ -35,6 +54,7 @@ function QRScanner({ onScanned }: { onScanned: (roomId: string) => void }) {
     );
   }
 
+  rlog.info('viewfinder', 'QRScanner: rendering Camera component');
   return (
     <Camera
       style={StyleSheet.absoluteFill}
@@ -55,17 +75,22 @@ export default function ViewfinderScreen() {
   const [permissionStatus, setPermissionStatus] = useState<string>('unknown');
 
   useEffect(() => {
+    rlog.info('viewfinder', 'ViewfinderScreen mounted');
     (async () => {
-      const VC = require('react-native-vision-camera');
-      const status = await VC.Camera.getCameraPermissionStatus();
-      if (status === 'granted') {
-        setPermissionStatus('granted');
-      } else {
-        const result = await VC.Camera.requestCameraPermission();
-        setPermissionStatus(result);
-        if (result !== 'granted') {
-          log.warn('Camera permission denied');
+      try {
+        rlog.info('viewfinder', 'Requesting camera permission');
+        const VC = require('react-native-vision-camera');
+        const status = await VC.Camera.getCameraPermissionStatus();
+        rlog.info('viewfinder', 'Permission status', { status });
+        if (status === 'granted') {
+          setPermissionStatus('granted');
+        } else {
+          const result = await VC.Camera.requestCameraPermission();
+          rlog.info('viewfinder', 'Permission request result', { result });
+          setPermissionStatus(result);
         }
+      } catch (e: any) {
+        rlog.fatal('viewfinder', 'Permission check crashed', { error: e?.message });
       }
     })();
   }, []);
