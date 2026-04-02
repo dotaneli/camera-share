@@ -73,7 +73,20 @@ function createPeerConnection(
     }
   });
 
-  // Listen for remote ICE candidates
+  // Handle remote stream
+  pc.addEventListener('track', (event: any) => {
+    rlog.info('webrtc', 'Remote track received', { kind: event.track?.kind });
+    if (event.streams && event.streams[0]) {
+      onRemoteStream(event.streams[0] as MediaStream);
+    }
+  });
+
+  return pc;
+}
+
+/** Start listening for remote ICE candidates — call AFTER remote description is set */
+function listenForIceCandidates(roomId: string, role: 'camera' | 'viewfinder', pc: any) {
+  const otherRole = role === 'camera' ? 'viewfinder' : 'camera';
   database()
     .ref(`/rooms/${roomId}/iceCandidates/${otherRole}`)
     .on('child_added', (snapshot) => {
@@ -84,16 +97,6 @@ function createPeerConnection(
           .catch((e: any) => rlog.error('webrtc', 'Failed to add ICE candidate', { error: e?.message }));
       }
     });
-
-  // Handle remote stream
-  pc.addEventListener('track', (event: any) => {
-    rlog.info('webrtc', 'Remote track received', { kind: event.track?.kind });
-    if (event.streams && event.streams[0]) {
-      onRemoteStream(event.streams[0] as MediaStream);
-    }
-  });
-
-  return pc;
 }
 
 /** Camera phone: create offer and start streaming */
@@ -125,17 +128,18 @@ export async function startAsCamera(
   });
   rlog.info('webrtc', 'Offer written to Firebase');
 
-  // Listen for answer
+  // Listen for answer, then start ICE candidate exchange
   database()
     .ref(`/rooms/${roomId}/answer`)
     .on('value', async (snapshot) => {
       const answer = snapshot.val();
-      if (answer && peerConnection && !peerConnection.remoteDescription) {
+      if (answer && answer.sdp && peerConnection && !peerConnection.remoteDescription) {
         rlog.info('webrtc', 'Answer received from viewfinder');
         await peerConnection.setRemoteDescription(
           new RTCSessionDescription(answer),
         );
-        rlog.info('webrtc', 'Remote description set');
+        rlog.info('webrtc', 'Remote description set — starting ICE exchange');
+        listenForIceCandidates(roomId, 'camera', peerConnection);
       }
     });
 
@@ -151,17 +155,30 @@ export async function startAsViewfinder(
 
   peerConnection = createPeerConnection(roomId, 'viewfinder', onRemoteStream);
 
-  // Read offer from Firebase
-  const offerSnapshot = await database().ref(`/rooms/${roomId}/offer`).once('value');
-  const offer = offerSnapshot.val();
+  // Wait for offer to appear in Firebase (camera may still be creating it)
+  rlog.info('webrtc', 'Waiting for offer from camera...');
+  const offer = await new Promise<any>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      ref.off('value', listener);
+      reject(new Error('Timeout waiting for offer (30s)'));
+    }, 30000);
 
-  if (!offer) {
-    rlog.error('webrtc', 'No offer found in room');
-    throw new Error('No offer found');
-  }
+    const ref = database().ref(`/rooms/${roomId}/offer`);
+    const listener = ref.on('value', (snapshot) => {
+      const data = snapshot.val();
+      if (data && data.sdp) {
+        clearTimeout(timeout);
+        ref.off('value', listener);
+        resolve(data);
+      }
+    });
+  });
 
   rlog.info('webrtc', 'Offer received from camera');
   await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+
+  // Now safe to listen for ICE candidates
+  listenForIceCandidates(roomId, 'viewfinder', peerConnection);
 
   // Create and set answer
   const answer = await peerConnection.createAnswer();
