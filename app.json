@@ -49,7 +49,14 @@
       "expo-router",
       "react-native-vision-camera",
       "@react-native-firebase/app",
-      "@react-native-firebase/auth"
+      "@react-native-firebase/auth",
+      ["expo-build-properties", {
+        "ios": {
+          "useFrameworks": "static",
+          "ccacheEnabled": true
+        }
+      }],
+      "./plugins/withFirebaseFix"
     ]
   }
 }
