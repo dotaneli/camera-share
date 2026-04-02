@@ -17,6 +17,28 @@ const ICE_SERVERS = {
 
 let peerConnection: RTCPeerConnection | null = null;
 let localStream: MediaStream | null = null;
+let dataChannel: any = null;
+let onMessageCallback: ((msg: any) => void) | null = null;
+
+/** Register a handler for incoming data channel messages */
+export function onDataMessage(callback: (msg: any) => void) {
+  onMessageCallback = callback;
+}
+
+/** Send a message via data channel */
+export function sendDataMessage(msg: any) {
+  if (dataChannel && dataChannel.readyState === 'open') {
+    dataChannel.send(JSON.stringify(msg));
+    rlog.info('webrtc', 'Data message sent', { type: msg.type });
+  } else {
+    rlog.warn('webrtc', 'Data channel not open, message dropped', { type: msg.type });
+  }
+}
+
+/** Get the local stream URL for PiP preview on camera phone */
+export function getLocalStreamUrl(): string | null {
+  return localStream ? (localStream as any).toURL() : null;
+}
 
 /** Get the local camera stream (720p, rear camera) */
 async function getLocalStream(): Promise<MediaStream> {
@@ -116,6 +138,20 @@ export async function startAsCamera(
   });
   rlog.info('webrtc', 'Local tracks added to peer connection');
 
+  // Create data channel (camera is the initiator)
+  dataChannel = (peerConnection as any).createDataChannel('control', { ordered: true });
+  dataChannel.onopen = () => rlog.info('webrtc', 'Data channel opened (camera)');
+  dataChannel.onclose = () => rlog.info('webrtc', 'Data channel closed (camera)');
+  dataChannel.onmessage = (event: any) => {
+    try {
+      const msg = JSON.parse(event.data);
+      rlog.info('webrtc', 'Data message received', { type: msg.type });
+      if (onMessageCallback) onMessageCallback(msg);
+    } catch (e) {
+      rlog.error('webrtc', 'Failed to parse data message');
+    }
+  };
+
   // Create and set offer
   const offer = await peerConnection.createOffer({});
   await peerConnection.setLocalDescription(offer);
@@ -154,6 +190,22 @@ export async function startAsViewfinder(
   rlog.info('webrtc', 'Starting as viewfinder');
 
   peerConnection = createPeerConnection(roomId, 'viewfinder', onRemoteStream);
+
+  // Listen for data channel from camera
+  (peerConnection as any).addEventListener('datachannel', (event: any) => {
+    dataChannel = event.channel;
+    dataChannel.onopen = () => rlog.info('webrtc', 'Data channel opened (viewfinder)');
+    dataChannel.onclose = () => rlog.info('webrtc', 'Data channel closed (viewfinder)');
+    dataChannel.onmessage = (evt: any) => {
+      try {
+        const msg = JSON.parse(evt.data);
+        rlog.info('webrtc', 'Data message received', { type: msg.type });
+        if (onMessageCallback) onMessageCallback(msg);
+      } catch (e) {
+        rlog.error('webrtc', 'Failed to parse data message');
+      }
+    };
+  });
 
   // Wait for offer to appear in Firebase (camera may still be creating it)
   rlog.info('webrtc', 'Waiting for offer from camera...');
@@ -202,10 +254,15 @@ export function cleanupWebRTC(roomId?: string) {
     localStream.getTracks().forEach((track) => track.stop());
     localStream = null;
   }
+  if (dataChannel) {
+    dataChannel.close();
+    dataChannel = null;
+  }
   if (peerConnection) {
     peerConnection.close();
     peerConnection = null;
   }
+  onMessageCallback = null;
   if (roomId) {
     database().ref(`/rooms/${roomId}/iceCandidates`).off();
     database().ref(`/rooms/${roomId}/answer`).off();
