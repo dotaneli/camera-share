@@ -14,15 +14,26 @@
       }
     },
     "preview": {
-      "distribution": "internal",
       "channel": "preview",
       "android": {
+        "distribution": "internal",
         "buildType": "apk"
+      },
+      "ios": {
+        "distribution": "store",
+        "autoIncrement": true
       }
     },
     "production": {}
   },
   "submit": {
-    "production": {}
+    "production": {},
+    "preview": {
+      "ios": {
+        "appleId": "dotaneli@gmail.com",
+        "ascAppId": "6761543677",
+        "appleTeamId": "36EN3QK346"
+      }
+    }
   }
 }

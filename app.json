@@ -17,7 +17,8 @@
       "bundleIdentifier": "com.dotaneli.camerashare",
       "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
-        "NSCameraUsageDescription": "CameraShare needs camera access to scan QR codes and take photos"
+        "NSCameraUsageDescription": "CameraShare needs camera access to scan QR codes and take photos",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
