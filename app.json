@@ -32,6 +32,7 @@
       "edgeToEdgeEnabled": true,
       "package": "com.dotaneli.camerashare",
       "googleServicesFile": "./google-services.json",
+      "versionCode": 1,
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
