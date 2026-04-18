@@ -76,5 +76,60 @@ describe('Pairing', () => {
     it('returns null for missing version', () => {
       expect(decodeQRPayload('{"r":"room"}')).toBeNull();
     });
+
+    it('accepts payloads with extra unknown fields (forward compat)', () => {
+      const payload = JSON.stringify({ r: 'roomXyz', v: 1, ext: 'future-extension', nested: { a: 1 } });
+      expect(decodeQRPayload(payload)).toEqual({ roomId: 'roomXyz', version: 1 });
+    });
+
+    it('returns null when r is non-string even if v is present', () => {
+      expect(decodeQRPayload(JSON.stringify({ r: 123, v: 1 }))).toBeNull();
+      expect(decodeQRPayload(JSON.stringify({ r: null, v: 1 }))).toBeNull();
+      expect(decodeQRPayload(JSON.stringify({ r: {}, v: 1 }))).toBeNull();
+    });
+
+    it('returns null when v is non-number', () => {
+      expect(decodeQRPayload(JSON.stringify({ r: 'room', v: '1' }))).toBeNull();
+      expect(decodeQRPayload(JSON.stringify({ r: 'room', v: null }))).toBeNull();
+    });
+
+    it('returns null for JSON primitives (string, number, bool)', () => {
+      expect(decodeQRPayload('"just a string"')).toBeNull();
+      expect(decodeQRPayload('42')).toBeNull();
+      expect(decodeQRPayload('true')).toBeNull();
+      expect(decodeQRPayload('null')).toBeNull();
+    });
+
+    it('encodes an empty room id (degenerate but valid shape)', () => {
+      const payload = encodeQRPayload('');
+      const parsed = JSON.parse(payload);
+      expect(parsed.r).toBe('');
+      expect(parsed.v).toBe(1);
+    });
+
+    it('is resilient to surrounding whitespace in the payload', () => {
+      const raw = '  ' + encodeQRPayload('roomY') + '  ';
+      // JSON.parse tolerates surrounding whitespace — so should we
+      expect(decodeQRPayload(raw)).toEqual({ roomId: 'roomY', version: 1 });
+    });
+  });
+
+  describe('deriveNumericCode: broader behavior', () => {
+    it('produces the same code for the same id across many calls', () => {
+      const id = 'stable-room-id-42';
+      const samples = Array.from({ length: 50 }, () => deriveNumericCode(id));
+      expect(new Set(samples).size).toBe(1);
+    });
+
+    it('is always exactly six digits, even for very long ids', () => {
+      const longId = 'x'.repeat(500);
+      const code = deriveNumericCode(longId);
+      expect(code).toMatch(/^\d{6}$/);
+    });
+
+    it('handles unicode input without throwing', () => {
+      expect(() => deriveNumericCode('📷🎥🎬')).not.toThrow();
+      expect(deriveNumericCode('📷🎥🎬')).toMatch(/^\d{6}$/);
+    });
   });
 });

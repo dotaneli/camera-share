@@ -151,4 +151,44 @@ describe('file-transfer: receiver', () => {
       handleTransferMessage({ type: 'file-chunk', index: 0, data: 'oops' }),
     ).not.toThrow();
   });
+
+  it('ignores file-end arriving before file-start without crashing', () => {
+    // After prior test's file-end cleared state, another stray file-end should no-op.
+    expect(() => handleTransferMessage({ type: 'file-end' })).not.toThrow();
+  });
+});
+
+describe('file-transfer: receiver robustness', () => {
+  it('receiver state resets after a completed transfer so the next one starts clean', async () => {
+    const finished: string[] = [];
+    onTransferComplete((success, type) => finished.push(`${type}:${success}`));
+
+    handleTransferMessage({ type: 'file-start', fileName: 'a.jpg', fileType: 'photo', totalChunks: 1, totalSize: 2 });
+    handleTransferMessage({ type: 'file-chunk', index: 0, data: 'aa' });
+    handleTransferMessage({ type: 'file-end' });
+    // Allow async save to settle
+    await new Promise((r) => setImmediate(r));
+
+    handleTransferMessage({ type: 'file-start', fileName: 'b.mp4', fileType: 'video', totalChunks: 1, totalSize: 2 });
+    handleTransferMessage({ type: 'file-chunk', index: 0, data: 'bb' });
+    handleTransferMessage({ type: 'file-end' });
+    await new Promise((r) => setImmediate(r));
+
+    expect(finished).toEqual(['photo:true', 'video:true']);
+  });
+
+  it('progress callback can be reassigned between transfers', () => {
+    const progress1: number[] = [];
+    const progress2: number[] = [];
+    onTransferProgress((received) => progress1.push(received));
+    handleTransferMessage({ type: 'file-start', fileName: 'x.jpg', fileType: 'photo', totalChunks: 2, totalSize: 4 });
+    handleTransferMessage({ type: 'file-chunk', index: 0, data: 'AA' });
+
+    // Swap callback mid-flight
+    onTransferProgress((received) => progress2.push(received));
+    handleTransferMessage({ type: 'file-chunk', index: 1, data: 'BB' });
+
+    expect(progress1).toEqual([1]);
+    expect(progress2).toEqual([2]);
+  });
 });

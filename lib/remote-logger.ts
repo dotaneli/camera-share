@@ -37,14 +37,20 @@ export function remoteLog(level: LogLevel, tag: string, message: string, extra?:
     entry.extra = typeof extra === 'object' ? JSON.stringify(extra) : String(extra);
   }
 
-  // Fire and forget — never await, never throw
-  fetch(`${FIREBASE_URL}.json`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(entry),
-  }).catch(() => {
-    // Silently ignore — logging should never crash the app
-  });
+  // Fire and forget — never await, never throw.
+  // Wrap in try/catch because fetch can also throw synchronously (e.g. bad URL,
+  // polyfill unavailable). Logging must never crash the caller.
+  try {
+    fetch(`${FIREBASE_URL}.json`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(entry),
+    }).catch(() => {
+      // Silently ignore async errors.
+    });
+  } catch {
+    // Silently ignore sync errors too.
+  }
 }
 
 /** Convenience wrappers */
