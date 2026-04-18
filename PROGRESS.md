@@ -2,7 +2,7 @@
 
 ## Current: Milestone 5 (Remote shutter + video + audio + zoom) — awaiting device verification
 
-## EAS Build Count: 12 Android + 5 iOS / 30 (free tier monthly limit, resets monthly)
+## EAS Build Count: 15 Android (LIMIT HIT — resets May 1) + 7 iOS / 15 per platform per month
 ## Deploy method: `eas update --branch preview` (free, unlimited, ~30s)
 
 ## Milestones
