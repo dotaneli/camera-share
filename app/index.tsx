@@ -1,12 +1,16 @@
 import { StyleSheet, Text, View, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppStore } from '../lib/store';
 import log from '../lib/logger';
 import { rlog } from '../lib/remote-logger';
+import { getVersionInfo, formatVersionSummary } from '../lib/version-info';
 
 export default function RoleSelectScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const setRole = useAppStore((s) => s.setRole);
+  const versionSummary = formatVersionSummary(getVersionInfo());
 
   rlog.info('app', 'RoleSelectScreen rendering');
 
@@ -44,6 +48,15 @@ export default function RoleSelectScreen() {
           <Text style={styles.buttonDesc}>This phone controls the shot</Text>
         </Pressable>
       </View>
+
+      <Pressable
+        onPress={() => router.push('/about')}
+        style={[styles.aboutButton, { bottom: insets.bottom + 16 }]}
+        accessibilityLabel="About and version info"
+        accessibilityRole="button"
+      >
+        <Text style={styles.aboutText}>About · {versionSummary}</Text>
+      </Pressable>
     </View>
   );
 }
@@ -104,5 +117,16 @@ const styles = StyleSheet.create({
   buttonDesc: {
     color: '#999',
     fontSize: 14,
+  },
+  aboutButton: {
+    position: 'absolute',
+    alignSelf: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  aboutText: {
+    color: '#555',
+    fontSize: 11,
+    fontFamily: 'monospace',
   },
 });

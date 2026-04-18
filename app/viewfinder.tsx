@@ -475,6 +475,9 @@ export default function ViewfinderScreen() {
         <Pressable onPress={() => setShowManualEntry(true)} style={styles.manualButton}>
           <Text style={styles.manualText}>Enter code manually</Text>
         </Pressable>
+        <Pressable onPress={() => router.push('/about')} style={styles.aboutLink} accessibilityLabel="About" accessibilityRole="button">
+          <Text style={styles.aboutLinkText}>About · version info</Text>
+        </Pressable>
       </View>
     </View>
   );
@@ -739,4 +742,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
   },
+  aboutLink: { marginTop: 14, paddingHorizontal: 12, paddingVertical: 6 },
+  aboutLinkText: { color: 'rgba(255,255,255,0.45)', fontSize: 12 },
 });

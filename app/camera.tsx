@@ -339,6 +339,9 @@ export default function CameraScreen() {
           <View style={styles.codePill}>
             <Text style={styles.codeText}>{numericCode}</Text>
           </View>
+          <Pressable onPress={() => router.push('/about')} style={styles.aboutLink} accessibilityLabel="About" accessibilityRole="button">
+            <Text style={styles.aboutLinkText}>About · version info</Text>
+          </Pressable>
         </View>
       )}
 
@@ -444,6 +447,8 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(74,158,255,0.5)',
   },
   codeText: { color: '#4a9eff', fontSize: 22, fontWeight: 'bold', letterSpacing: 6, fontVariant: ['tabular-nums'] },
+  aboutLink: { marginTop: 24, paddingHorizontal: 12, paddingVertical: 6 },
+  aboutLinkText: { color: 'rgba(255,255,255,0.45)', fontSize: 12 },
 
   // Capture overlays
   flashOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(255,255,255,0.6)', zIndex: 15 },
