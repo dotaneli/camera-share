@@ -60,6 +60,27 @@ export default function CameraScreen() {
       rlog.fatal('camera', 'QR library failed', { error: e?.message });
     }
 
+    // Pre-request vision-camera permissions so the first shutter doesn't stall on a prompt.
+    // Why: webrtc has its own permission flow for getUserMedia; vision-camera needs a separate
+    // grant before takePhoto/startRecording works. Requesting early lets the OS cache the grant.
+    (async () => {
+      try {
+        const VC = require('react-native-vision-camera');
+        const camStatus = await VC.Camera.getCameraPermissionStatus();
+        if (camStatus !== 'granted') {
+          const r = await VC.Camera.requestCameraPermission();
+          rlog.info('camera', 'Pre-warmed camera permission', { result: r });
+        }
+        const micStatus = await VC.Camera.getMicrophonePermissionStatus();
+        if (micStatus !== 'granted') {
+          const r = await VC.Camera.requestMicrophonePermission();
+          rlog.info('camera', 'Pre-warmed microphone permission', { result: r });
+        }
+      } catch (e: any) {
+        rlog.warn('camera', 'Permission pre-warm failed', { error: e?.message });
+      }
+    })();
+
     // Start a preview-only stream (separate from peer connection stream)
     initPreviewStream().then((url) => {
       setLocalStreamUrl(url);
@@ -285,8 +306,11 @@ export default function CameraScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Full-screen camera preview (webrtc local stream) */}
-      {localStreamUrl ? (
+      {/* Preview: swap between webrtc stream (normal) and vision-camera (during capture).
+          Why: on Android, vision-camera's SurfaceView ignores 1×1/opacity-0 sizing and paints
+          directly to the window, which caused a split-screen overlay during record. Rendering
+          only one preview at a time avoids the conflict. */}
+      {!visionCameraActive && localStreamUrl && (
         <RTCView
           streamURL={localStreamUrl}
           style={StyleSheet.absoluteFill}
@@ -294,13 +318,13 @@ export default function CameraScreen() {
           mirror={false}
           zOrder={0}
         />
-      ) : (
+      )}
+      {!visionCameraActive && !localStreamUrl && (
         <View style={[StyleSheet.absoluteFill, styles.loadingBg]}>
           <Text style={styles.loadingText}>Starting camera...</Text>
         </View>
       )}
 
-      {/* Vision Camera for high-res capture — only active during capture */}
       {VisionCameraComponent && visionCameraActive && (
         <VisionCameraCapture
           CameraComponent={VisionCameraComponent}
@@ -374,7 +398,7 @@ export default function CameraScreen() {
   );
 }
 
-/** Vision Camera for high-res capture — rendered at 1x1 pixel, invisible to user */
+/** Vision Camera for high-res capture — full-screen preview while active. */
 function VisionCameraCapture({
   CameraComponent,
   useCameraDevice,
@@ -396,20 +420,18 @@ function VisionCameraCapture({
   if (!device) return null;
 
   return (
-    <View style={styles.hiddenCamera} pointerEvents="none">
-      <CameraComponent
-        ref={cameraRef}
-        style={{ width: 1, height: 1 }}
-        device={device}
-        isActive={true}
-        photo={true}
-        video={true}
-        audio={audio}
-        zoom={zoom}
-        onInitialized={onInitialized}
-        onError={onError}
-      />
-    </View>
+    <CameraComponent
+      ref={cameraRef}
+      style={StyleSheet.absoluteFill}
+      device={device}
+      isActive={true}
+      photo={true}
+      video={true}
+      audio={audio}
+      zoom={zoom}
+      onInitialized={onInitialized}
+      onError={onError}
+    />
   );
 }
 
@@ -471,8 +493,4 @@ const styles = StyleSheet.create({
   bottomHint: { color: 'rgba(255,255,255,0.6)', fontSize: 14, textAlign: 'center' },
   streamInfo: { color: 'rgba(255,255,255,0.5)', fontSize: 12, textAlign: 'center' },
 
-  // Hidden vision camera
-  hiddenCamera: {
-    position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0,
-  },
 });

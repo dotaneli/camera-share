@@ -32,10 +32,12 @@ module.exports = function withWebRTCZoom(config) {
     const webrtcRoot = path.resolve(config.modRequest.projectRoot, 'node_modules/react-native-webrtc');
     const androidSrc = path.join(webrtcRoot, 'android/src/main/java');
 
-    // 1. Create Camera2Zoom.java helper (in org.webrtc package for access to internals)
+    // 1. Create Camera2Zoom.java helper (in org.webrtc package for access to internals).
+    // setZoom returns null on success, or an error string describing what went wrong.
+    // Callers forward that string to JS via mediaStreamTrackSetZoomWithResult for diagnostics.
     const zoomHelperDir = path.join(androidSrc, 'org/webrtc');
     const zoomHelperPath = path.join(zoomHelperDir, 'Camera2Zoom.java');
-    if (!fs.existsSync(zoomHelperPath) || !fs.readFileSync(zoomHelperPath, 'utf8').includes('setZoom')) {
+    if (!fs.existsSync(zoomHelperPath) || !fs.readFileSync(zoomHelperPath, 'utf8').includes('String setZoom')) {
       fs.writeFileSync(zoomHelperPath, `package org.webrtc;
 
 import android.content.Context;
@@ -48,63 +50,61 @@ import java.lang.reflect.Field;
 public class Camera2Zoom {
     private static final String TAG = "Camera2Zoom";
 
-    public static void setZoom(Camera2Capturer capturer, Context context, String cameraName, float zoomFactor) {
+    /** @return null on success, or an error string describing why zoom could not be applied. */
+    public static String setZoom(Camera2Capturer capturer, Context context, String cameraName, float zoomFactor) {
         try {
-            // Access Camera2Session from Camera2Capturer via reflection
             Field sessionField = Camera2Capturer.class.getDeclaredField("currentSession");
             sessionField.setAccessible(true);
             Object camera2Session = sessionField.get(capturer);
             if (camera2Session == null) {
-                Log.w(TAG, "No current camera session");
-                return;
+                return "no current camera session";
             }
 
-            // Get CameraCaptureSession from Camera2Session
             Field csField = camera2Session.getClass().getDeclaredField("captureSession");
             csField.setAccessible(true);
             CameraCaptureSession captureSession = (CameraCaptureSession) csField.get(camera2Session);
 
-            // Get Surface from Camera2Session
             Field surfaceField = camera2Session.getClass().getDeclaredField("surface");
             surfaceField.setAccessible(true);
             android.view.Surface surface = (android.view.Surface) surfaceField.get(camera2Session);
 
-            if (captureSession == null || surface == null) {
-                Log.w(TAG, "CaptureSession or surface is null");
-                return;
-            }
+            if (captureSession == null) return "captureSession is null";
+            if (surface == null) return "surface is null";
 
             CameraDevice device = captureSession.getDevice();
             CaptureRequest.Builder builder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
             builder.addTarget(surface);
 
-            // Preserve standard camera settings
             builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO);
             builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
             builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO);
 
-            // Apply zoom
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoomFactor);
             } else {
-                // Fallback: SCALER_CROP_REGION for older Android
                 CameraManager cameraManager = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
                 CameraCharacteristics chars = cameraManager.getCameraCharacteristics(cameraName);
                 Rect sensorRect = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE);
-                if (sensorRect != null) {
-                    int cropW = (int) (sensorRect.width() / zoomFactor);
-                    int cropH = (int) (sensorRect.height() / zoomFactor);
-                    int cropX = (sensorRect.width() - cropW) / 2;
-                    int cropY = (sensorRect.height() - cropH) / 2;
-                    builder.set(CaptureRequest.SCALER_CROP_REGION,
-                        new Rect(cropX, cropY, cropX + cropW, cropY + cropH));
+                if (sensorRect == null) {
+                    return "sensor rect unavailable on legacy device";
                 }
+                int cropW = (int) (sensorRect.width() / zoomFactor);
+                int cropH = (int) (sensorRect.height() / zoomFactor);
+                int cropX = (sensorRect.width() - cropW) / 2;
+                int cropY = (sensorRect.height() - cropH) / 2;
+                builder.set(CaptureRequest.SCALER_CROP_REGION,
+                    new Rect(cropX, cropY, cropX + cropW, cropY + cropH));
             }
 
             captureSession.setRepeatingRequest(builder.build(), null, null);
             Log.i(TAG, "Zoom set to " + zoomFactor);
+            return null;
+        } catch (NoSuchFieldException e) {
+            Log.e(TAG, "Reflection field missing: " + e.getMessage(), e);
+            return "reflection: field missing (" + e.getMessage() + ")";
         } catch (Exception e) {
             Log.e(TAG, "Failed to set zoom: " + e.getMessage(), e);
+            return e.getClass().getSimpleName() + ": " + e.getMessage();
         }
     }
 }
@@ -120,14 +120,16 @@ public class Camera2Zoom {
     );
     patchFile(cccPath,
       '    private void updateActualSize(',
-      `    public void setZoom(double zoomFactor) {
-        if (videoCapturer instanceof Camera2Capturer) {
-            String[] deviceNames = cameraEnumerator.getDeviceNames();
-            int idx = currentDeviceId != null ? Integer.parseInt(currentDeviceId) : 0;
-            if (idx >= 0 && idx < deviceNames.length) {
-                Camera2Zoom.setZoom((Camera2Capturer) videoCapturer, context, deviceNames[idx], (float) zoomFactor);
-            }
+      `    public String setZoom(double zoomFactor) {
+        if (!(videoCapturer instanceof Camera2Capturer)) {
+            return "videoCapturer is not Camera2Capturer";
         }
+        String[] deviceNames = cameraEnumerator.getDeviceNames();
+        int idx = currentDeviceId != null ? Integer.parseInt(currentDeviceId) : 0;
+        if (idx < 0 || idx >= deviceNames.length) {
+            return "invalid camera index " + idx;
+        }
+        return Camera2Zoom.setZoom((Camera2Capturer) videoCapturer, context, deviceNames[idx], (float) zoomFactor);
     }
 
     private void updateActualSize(`
@@ -137,24 +139,43 @@ public class Camera2Zoom {
     const gumiPath = path.join(androidSrc, 'com/oney/WebRTCModule/GetUserMediaImpl.java');
     patchFile(gumiPath,
       '    /**\n     * Application/library-specific private members of local',
-      `    void setZoom(String trackId, double zoomFactor) {
+      `    String setZoom(String trackId, double zoomFactor) {
         TrackPrivate track = tracks.get(trackId);
-        if (track != null && track.videoCaptureController instanceof CameraCaptureController) {
-            ((CameraCaptureController) track.videoCaptureController).setZoom(zoomFactor);
+        if (track == null) return "track not found: " + trackId;
+        if (!(track.videoCaptureController instanceof CameraCaptureController)) {
+            return "track is not a camera track";
         }
+        return ((CameraCaptureController) track.videoCaptureController).setZoom(zoomFactor);
     }
 
     /**
      * Application/library-specific private members of local`
     );
 
-    // 4. Patch WebRTCModule.java — expose to JS
+    // 4. Patch WebRTCModule.java — expose to JS.
+    // Two flavors: the old fire-and-forget void method (kept so existing JS keeps working),
+    // and a new promise-returning variant that resolves with { ok, reason } so JS can log failures.
     const wrtcPath = path.join(androidSrc, 'com/oney/WebRTCModule/WebRTCModule.java');
     patchFile(wrtcPath,
       '    @ReactMethod\n    public void peerConnectionSetConfiguration',
       `    @ReactMethod
     public void mediaStreamTrackSetZoom(String id, double zoomFactor) {
         ThreadUtils.runOnExecutor(() -> { getUserMediaImpl.setZoom(id, zoomFactor); });
+    }
+
+    @ReactMethod
+    public void mediaStreamTrackSetZoomWithResult(String id, double zoomFactor, Promise promise) {
+        ThreadUtils.runOnExecutor(() -> {
+            try {
+                String err = getUserMediaImpl.setZoom(id, zoomFactor);
+                WritableMap result = Arguments.createMap();
+                result.putBoolean("ok", err == null);
+                if (err != null) result.putString("reason", err);
+                promise.resolve(result);
+            } catch (Throwable t) {
+                promise.reject("ZOOM_ERROR", t);
+            }
+        });
     }
 
     @ReactMethod

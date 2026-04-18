@@ -49,19 +49,46 @@ export function getLocalStreamUrl(): string | null {
   return localStream ? (localStream as any).toURL() : null;
 }
 
-/** Apply hardware zoom to the active camera stream */
-export function setHardwareZoom(zoomFactor: number) {
+/**
+ * Apply hardware zoom to the active camera stream.
+ *
+ * Prefers the promise-returning `mediaStreamTrackSetZoomWithResult` (added to
+ * Android by the withWebRTCZoom plugin in the latest native build). That variant
+ * resolves with `{ ok, reason }` so we can log why zoom didn't apply when it doesn't.
+ *
+ * Falls back to the fire-and-forget `mediaStreamTrackSetZoom` on iOS and on older
+ * Android builds that predate the diagnostic method, so iOS zoom continues to work
+ * across an OTA gap before the matching native build is installed.
+ */
+export async function setHardwareZoom(zoomFactor: number) {
   if (!localStream) {
     rlog.debug('webrtc', 'No local stream for zoom');
     return;
   }
   const videoTrack = localStream.getVideoTracks()[0];
   if (!videoTrack) return;
+  const trackId = (videoTrack as any)._id || (videoTrack as any).id;
+
+  if (typeof WebRTCModule?.mediaStreamTrackSetZoomWithResult === 'function') {
+    try {
+      const result = await WebRTCModule.mediaStreamTrackSetZoomWithResult(trackId, zoomFactor);
+      if (result?.ok) {
+        rlog.debug('webrtc', 'Hardware zoom applied', { zoom: zoomFactor });
+      } else {
+        rlog.warn('webrtc', 'Hardware zoom did not apply', { zoom: zoomFactor, reason: result?.reason });
+      }
+      return;
+    } catch (e: any) {
+      rlog.warn('webrtc', 'Hardware zoom native error', { zoom: zoomFactor, error: e?.message });
+      return;
+    }
+  }
+
   try {
-    WebRTCModule.mediaStreamTrackSetZoom((videoTrack as any)._id || (videoTrack as any).id, zoomFactor);
-    rlog.debug('webrtc', 'Hardware zoom applied', { zoom: zoomFactor });
+    WebRTCModule.mediaStreamTrackSetZoom(trackId, zoomFactor);
+    rlog.debug('webrtc', 'Hardware zoom applied (legacy)', { zoom: zoomFactor });
   } catch (e: any) {
-    rlog.debug('webrtc', 'Hardware zoom failed', { error: e?.message });
+    rlog.debug('webrtc', 'Hardware zoom failed (legacy)', { error: e?.message });
   }
 }
 
