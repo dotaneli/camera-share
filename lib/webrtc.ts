@@ -5,8 +5,11 @@ import {
   mediaDevices,
   MediaStream,
 } from 'react-native-webrtc';
+import { NativeModules } from 'react-native';
 import database from '@react-native-firebase/database';
 import { rlog } from './remote-logger';
+
+const { WebRTCModule } = NativeModules;
 
 const ICE_SERVERS = {
   iceServers: [
@@ -19,7 +22,6 @@ let peerConnection: RTCPeerConnection | null = null;
 let localStream: MediaStream | null = null;
 let dataChannel: any = null;
 let onMessageCallback: ((msg: any) => void) | null = null;
-
 /** Register a handler for incoming data channel messages */
 export function onDataMessage(callback: (msg: any) => void) {
   onMessageCallback = callback;
@@ -35,20 +37,93 @@ export function sendDataMessage(msg: any) {
   }
 }
 
-/** Get the local stream URL for PiP preview on camera phone */
+/** Send raw string data (for file transfer chunks) */
+export function sendRawData(data: string) {
+  if (dataChannel && dataChannel.readyState === 'open') {
+    dataChannel.send(data);
+  }
+}
+
+/** Get the local stream URL for preview on camera phone */
 export function getLocalStreamUrl(): string | null {
   return localStream ? (localStream as any).toURL() : null;
 }
 
-/** Get the local camera stream (720p, rear camera) */
+/** Apply hardware zoom to the active camera stream */
+export function setHardwareZoom(zoomFactor: number) {
+  if (!localStream) {
+    rlog.debug('webrtc', 'No local stream for zoom');
+    return;
+  }
+  const videoTrack = localStream.getVideoTracks()[0];
+  if (!videoTrack) return;
+  try {
+    WebRTCModule.mediaStreamTrackSetZoom((videoTrack as any)._id || (videoTrack as any).id, zoomFactor);
+    rlog.debug('webrtc', 'Hardware zoom applied', { zoom: zoomFactor });
+  } catch (e: any) {
+    rlog.debug('webrtc', 'Hardware zoom failed', { error: e?.message });
+  }
+}
+
+/** Start a preview-only stream (separate from the peer connection stream) */
+export async function initPreviewStream(): Promise<string> {
+  const preview = await getLocalStream();
+  localStream = preview as MediaStream;
+  return (preview as any).toURL();
+}
+
+/**
+ * Release the local camera so another library (vision-camera) can open it.
+ * Why: Android/iOS only permit one owner of a physical camera device at a time.
+ * Stops the track(s) but keeps the peer connection open for sender.replaceTrack() on resume.
+ */
+export async function pauseCameraCapture(): Promise<void> {
+  if (!localStream) {
+    rlog.debug('webrtc', 'pauseCameraCapture: no local stream');
+    return;
+  }
+  rlog.info('webrtc', 'Pausing camera capture (releasing hardware)');
+  localStream.getTracks().forEach((t) => t.stop());
+}
+
+/**
+ * Re-acquire the camera after a pause and wire the new track into the peer connection.
+ * Uses RTCRtpSender.replaceTrack to avoid SDP renegotiation.
+ * Returns the new stream URL for the local preview, or null if there is no peer connection.
+ */
+export async function resumeCameraCapture(): Promise<string | null> {
+  rlog.info('webrtc', 'Resuming camera capture');
+  const newStream = await getLocalStream();
+  localStream = newStream;
+
+  if (peerConnection) {
+    const senders = (peerConnection as any).getSenders?.() ?? [];
+    for (const sender of senders) {
+      const kind = sender.track?.kind;
+      const newTrack = newStream.getTracks().find((t) => t.kind === kind);
+      if (newTrack) {
+        try {
+          await sender.replaceTrack(newTrack);
+          rlog.info('webrtc', 'Track replaced on sender', { kind });
+        } catch (e: any) {
+          rlog.error('webrtc', 'replaceTrack failed', { kind, error: e?.message });
+        }
+      }
+    }
+  }
+
+  return (newStream as any).toURL();
+}
+
+/** Get the local camera stream (1080p, rear camera, with audio) */
 async function getLocalStream(): Promise<MediaStream> {
   rlog.info('webrtc', 'Getting local camera stream');
   const stream = await mediaDevices.getUserMedia({
-    audio: false,
+    audio: true,
     video: {
       facingMode: 'environment',
-      width: { ideal: 1280 },
-      height: { ideal: 720 },
+      width: { ideal: 1920 },
+      height: { ideal: 1080 },
       frameRate: { ideal: 30 },
     },
   });
@@ -127,6 +202,8 @@ export async function startAsCamera(
 ): Promise<{ localStream: MediaStream; peerConnection: RTCPeerConnection }> {
   rlog.info('webrtc', 'Starting as camera');
 
+  // Always create a fresh stream for the peer connection
+  // (preview stream is separate and will be released when this grabs the camera)
   localStream = await getLocalStream();
   peerConnection = createPeerConnection(roomId, 'camera', () => {
     // Camera doesn't need remote stream

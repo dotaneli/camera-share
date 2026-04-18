@@ -32,7 +32,10 @@
       "ios": {
         "appleId": "dotaneli@gmail.com",
         "ascAppId": "6761543677",
-        "appleTeamId": "36EN3QK346"
+        "appleTeamId": "36EN3QK346",
+        "ascApiKeyId": "5CPP6CK6TF",
+        "ascApiKeyIssuerId": "69a6de90-4067-47e3-e053-5b8c7c11a4d1",
+        "ascApiKeyPath": "./AuthKey_5CPP6CK6TF.p8"
       }
     }
   }

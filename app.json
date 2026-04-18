@@ -18,8 +18,11 @@
       "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "NSCameraUsageDescription": "CameraShare needs camera access to scan QR codes and take photos",
+        "NSMicrophoneUsageDescription": "CameraShare streams audio from the camera phone to the viewfinder phone",
+        "NSPhotoLibraryAddUsageDescription": "CameraShare saves photos and videos to your photo library",
         "ITSAppUsesNonExemptEncryption": false
-      }
+      },
+      "buildNumber": "5"
     },
     "android": {
       "adaptiveIcon": {
@@ -30,7 +33,10 @@
       "package": "com.dotaneli.camerashare",
       "googleServicesFile": "./google-services.json",
       "permissions": [
-        "android.permission.CAMERA"
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO"
       ]
     },
     "extra": {
@@ -51,13 +57,24 @@
       "react-native-vision-camera",
       "@react-native-firebase/app",
       "@react-native-firebase/auth",
-      ["expo-build-properties", {
-        "ios": {
-          "useFrameworks": "static",
-          "ccacheEnabled": true
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "useFrameworks": "static",
+            "ccacheEnabled": true
+          }
         }
-      }],
-      "./plugins/withFirebaseFix"
+      ],
+      "./plugins/withFirebaseFix",
+      "./plugins/withWebRTCZoom",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "CameraShare saves photos and videos to your photo library",
+          "savePhotosPermission": "CameraShare saves photos and videos to your photo library"
+        }
+      ]
     ]
   }
 }

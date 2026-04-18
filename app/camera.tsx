@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { StyleSheet, Text, View, Pressable, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -6,7 +6,12 @@ import { RTCView } from 'react-native-webrtc';
 import { useAppStore } from '../lib/store';
 import { generateRoomId, deriveNumericCode, encodeQRPayload } from '../lib/pairing';
 import { createRoom, deleteRoom, onRoomStatusChange } from '../lib/firebase';
-import { startAsCamera, cleanupWebRTC, onDataMessage, sendDataMessage, getLocalStreamUrl } from '../lib/webrtc';
+import {
+  startAsCamera, cleanupWebRTC, onDataMessage, sendDataMessage,
+  initPreviewStream, getLocalStreamUrl, setHardwareZoom,
+  pauseCameraCapture, resumeCameraCapture,
+} from '../lib/webrtc';
+import { sendFile } from '../lib/file-transfer';
 import { rlog } from '../lib/remote-logger';
 
 let QRCode: any = null;
@@ -15,26 +20,55 @@ export default function CameraScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const resetRole = useAppStore((s) => s.resetRole);
-  const [roomId, setRoomId] = useState<string>('');
-  const [numericCode, setNumericCode] = useState<string>('');
-  const [qrPayload, setQrPayload] = useState<string>('');
+
+  const [roomId, setRoomId] = useState('');
+  const [numericCode, setNumericCode] = useState('');
+  const [qrPayload, setQrPayload] = useState('');
   const [qrReady, setQrReady] = useState(false);
   const [roomStatus, setRoomStatus] = useState<string>('creating');
   const [streaming, setStreaming] = useState(false);
   const [localStreamUrl, setLocalStreamUrl] = useState<string | null>(null);
   const [captureStatus, setCaptureStatus] = useState<string | null>(null);
-  const roomIdRef = useRef<string>('');
+  const [isRecording, setIsRecording] = useState(false);
+  const zoomRef = useRef(1);
+  const [visionCameraActive, setVisionCameraActive] = useState(false);
+  const [visionCameraAudio, setVisionCameraAudio] = useState(false);
 
+  const roomIdRef = useRef('');
+  const visionCameraRef = useRef<any>(null);
+  const visionCameraReadyRef = useRef(false);
+
+  // Why: vision-camera's <Camera> initializes asynchronously after mount.
+  // Racing takePhoto against an uninitialized camera silently fails.
+  const waitForVisionCamera = useCallback(async (timeoutMs = 3500) => {
+    const start = Date.now();
+    while (!visionCameraReadyRef.current && Date.now() - start < timeoutMs) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return visionCameraReadyRef.current;
+  }, []);
+
+  // Start camera preview immediately on mount
   useEffect(() => {
     rlog.info('camera', 'CameraScreen mounted');
+
+    // Load QR library
     try {
       QRCode = require('react-native-qrcode-svg').default;
-      rlog.info('camera', 'QR library loaded');
       setQrReady(true);
     } catch (e: any) {
       rlog.fatal('camera', 'QR library failed', { error: e?.message });
     }
 
+    // Start a preview-only stream (separate from peer connection stream)
+    initPreviewStream().then((url) => {
+      setLocalStreamUrl(url);
+      rlog.info('camera', 'Camera preview started');
+    }).catch((e: any) => {
+      rlog.fatal('camera', 'Camera preview failed', { error: e?.message });
+    });
+
+    // Create room for pairing
     const id = generateRoomId();
     const code = deriveNumericCode(id);
     setRoomId(id);
@@ -48,22 +82,16 @@ export default function CameraScreen() {
 
     // Handle incoming commands from viewfinder
     onDataMessage(async (msg) => {
-      if (msg.type === 'shutter') {
-        rlog.info('camera', 'Shutter command received');
-        setCaptureStatus('capturing');
-        try {
-          const VisionCamera = require('react-native-vision-camera');
-          // Vision-camera needs a ref — we'll use takeSnapshot from webrtc stream for now
-          // Full vision-camera capture requires more setup (M5 enhancement)
-          rlog.info('camera', 'Photo captured (placeholder — full-res capture coming)');
-          sendDataMessage({ type: 'shutter-done', success: true });
-          setCaptureStatus('done');
-          setTimeout(() => setCaptureStatus(null), 2000);
-        } catch (e: any) {
-          rlog.error('camera', 'Capture failed', { error: e?.message });
-          sendDataMessage({ type: 'shutter-done', success: false, error: e?.message });
-          setCaptureStatus(null);
-        }
+      if (msg.type === 'zoom') {
+        zoomRef.current = msg.level ?? 1;
+        setHardwareZoom(zoomRef.current);
+        rlog.info('camera', 'Zoom updated', { zoom: zoomRef.current });
+      } else if (msg.type === 'shutter') {
+        handleCapturePhoto();
+      } else if (msg.type === 'record-start') {
+        handleStartRecording();
+      } else if (msg.type === 'record-stop') {
+        handleStopRecording();
       } else if (msg.type === 'disconnect') {
         rlog.info('camera', 'Remote disconnect received');
         cleanupWebRTC(roomIdRef.current);
@@ -72,6 +100,7 @@ export default function CameraScreen() {
       }
     });
 
+    // Listen for viewfinder joining
     const unsubscribe = onRoomStatusChange(id, async (status) => {
       setRoomStatus(status);
       if (status === 'paired') {
@@ -79,6 +108,7 @@ export default function CameraScreen() {
         try {
           await startAsCamera(id);
           setStreaming(true);
+          // Update preview to use the peer connection's fresh stream
           setLocalStreamUrl(getLocalStreamUrl());
           rlog.info('camera', 'WebRTC streaming started');
         } catch (e: any) {
@@ -94,6 +124,139 @@ export default function CameraScreen() {
     };
   }, []);
 
+  // Why: vision-camera and webrtc can't own the same physical camera simultaneously.
+  // We release webrtc → let vision-camera open the camera → capture → unmount vision-camera →
+  // re-acquire via getUserMedia → replaceTrack on the existing sender (no SDP renegotiation).
+  const activateVisionCamera = useCallback(async (withAudio: boolean) => {
+    visionCameraReadyRef.current = false;
+    setVisionCameraAudio(withAudio);
+    await pauseCameraCapture();
+    setVisionCameraActive(true);
+    const ready = await waitForVisionCamera();
+    if (!ready) {
+      rlog.error('camera', 'Vision camera never initialized');
+      setVisionCameraActive(false);
+      await resumeCameraCapture().then((url) => url && setLocalStreamUrl(url));
+      return null;
+    }
+    return visionCameraRef.current;
+  }, [waitForVisionCamera]);
+
+  const deactivateVisionCamera = useCallback(async () => {
+    setVisionCameraActive(false);
+    visionCameraReadyRef.current = false;
+    const url = await resumeCameraCapture();
+    if (url) setLocalStreamUrl(url);
+  }, []);
+
+  // Save captured media to the camera phone's gallery too — durability if the
+  // viewfinder disconnects mid-transfer, or the user wants the photo on both phones.
+  const saveToLocalGallery = useCallback(async (path: string) => {
+    try {
+      const MediaLibrary = require('expo-media-library') as typeof import('expo-media-library');
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') {
+        rlog.warn('camera', 'Local media-library permission denied');
+        return;
+      }
+      const uri = path.startsWith('file://') ? path : `file://${path}`;
+      await MediaLibrary.saveToLibraryAsync(uri);
+      rlog.info('camera', 'Saved to local gallery', { uri });
+    } catch (e: any) {
+      rlog.error('camera', 'Local gallery save failed', { error: e?.message });
+    }
+  }, []);
+
+  // ── Photo capture ──
+  const handleCapturePhoto = useCallback(async () => {
+    rlog.info('camera', 'Shutter command received');
+    setCaptureStatus('capturing');
+    try {
+      const camera = await activateVisionCamera(false);
+      if (!camera) {
+        sendDataMessage({ type: 'shutter-done', success: false, error: 'Camera not ready' });
+        setCaptureStatus(null);
+        return;
+      }
+      const photo = await camera.takePhoto({
+        qualityPrioritization: 'quality',
+        enableShutterSound: true,
+      });
+      rlog.info('camera', 'Photo captured', { path: photo.path, width: photo.width, height: photo.height });
+
+      const photoPath = photo.path.startsWith('file://') ? photo.path : `file://${photo.path}`;
+      await saveToLocalGallery(photoPath);
+
+      await deactivateVisionCamera();
+
+      setCaptureStatus('sending');
+      sendDataMessage({ type: 'shutter-done', success: true });
+      await sendFile(photoPath, 'photo');
+      setCaptureStatus('done');
+      setTimeout(() => setCaptureStatus(null), 2000);
+    } catch (e: any) {
+      rlog.error('camera', 'Capture failed', { error: e?.message });
+      sendDataMessage({ type: 'shutter-done', success: false, error: e?.message });
+      setCaptureStatus(null);
+      await deactivateVisionCamera();
+    }
+  }, [activateVisionCamera, deactivateVisionCamera, saveToLocalGallery]);
+
+  // ── Video recording ──
+  const handleStartRecording = useCallback(async () => {
+    rlog.info('camera', 'Record start command received');
+    setIsRecording(true);
+    setCaptureStatus('recording');
+    try {
+      const camera = await activateVisionCamera(true);
+      if (!camera) {
+        sendDataMessage({ type: 'record-ack', recording: false, error: 'Camera not ready' });
+        setCaptureStatus(null);
+        setIsRecording(false);
+        return;
+      }
+      camera.startRecording({
+        onRecordingFinished: async (video: any) => {
+          rlog.info('camera', 'Video recorded', { path: video.path, duration: video.duration });
+          const videoPath = video.path.startsWith('file://') ? video.path : `file://${video.path}`;
+          await saveToLocalGallery(videoPath);
+          await deactivateVisionCamera();
+          setCaptureStatus('sending');
+          sendDataMessage({ type: 'record-done', duration: video.duration });
+          await sendFile(videoPath, 'video');
+          setCaptureStatus(null);
+          setIsRecording(false);
+        },
+        onRecordingError: async (error: any) => {
+          rlog.error('camera', 'Recording error', { error: error?.message });
+          await deactivateVisionCamera();
+          sendDataMessage({ type: 'record-done', error: error?.message });
+          setCaptureStatus(null);
+          setIsRecording(false);
+        },
+      });
+      sendDataMessage({ type: 'record-ack', recording: true });
+    } catch (e: any) {
+      rlog.error('camera', 'Start recording failed', { error: e?.message });
+      await deactivateVisionCamera();
+      setCaptureStatus(null);
+      setIsRecording(false);
+    }
+  }, [activateVisionCamera, deactivateVisionCamera, saveToLocalGallery]);
+
+  const handleStopRecording = useCallback(async () => {
+    rlog.info('camera', 'Record stop command received');
+    try {
+      const camera = visionCameraRef.current;
+      if (camera) {
+        await camera.stopRecording();
+      }
+    } catch (e: any) {
+      rlog.error('camera', 'Stop recording failed', { error: e?.message });
+    }
+  }, []);
+
+  // ── Disconnect ──
   const handleBack = () => {
     rlog.info('camera', 'Leaving camera mode');
     sendDataMessage({ type: 'disconnect' });
@@ -102,112 +265,209 @@ export default function CameraScreen() {
     router.back();
   };
 
-  // Streaming view — show PiP of own camera + status
-  if (streaming) {
-    return (
-      <View style={styles.container}>
-        <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-          <Pressable onPress={handleBack} style={styles.backButton} accessibilityLabel="Disconnect" accessibilityRole="button">
-            <Text style={styles.backText}>← Disconnect</Text>
-          </Pressable>
-          <View style={styles.streamingBadge}>
-            <Text style={styles.streamingText}>● STREAMING</Text>
-          </View>
-        </View>
+  // ── Vision Camera for high-res capture (rendered but small/hidden) ──
+  let VisionCameraComponent: any = null;
+  let useCameraDeviceHook: any = null;
+  try {
+    const VC = require('react-native-vision-camera');
+    VisionCameraComponent = VC.Camera;
+    useCameraDeviceHook = VC.useCameraDevice;
+  } catch {}
 
-        <View style={styles.streamContent}>
-          <Text style={styles.streamTitle}>Streaming to Viewfinder</Text>
-          <Text style={styles.streamInfo}>720p • 30fps • H.264</Text>
-
-          {/* PiP preview of own camera */}
-          {localStreamUrl && (
-            <View style={styles.pipContainer}>
-              <RTCView
-                streamURL={localStreamUrl}
-                style={styles.pipView}
-                objectFit="cover"
-                mirror={false}
-              />
-            </View>
-          )}
-
-          {captureStatus === 'capturing' && (
-            <View style={styles.captureOverlay}>
-              <Text style={styles.captureText}>📸 Capturing...</Text>
-            </View>
-          )}
-          {captureStatus === 'done' && (
-            <View style={styles.captureOverlay}>
-              <Text style={styles.captureText}>✓ Photo captured</Text>
-            </View>
-          )}
-        </View>
-      </View>
-    );
-  }
-
-  // QR code / waiting view
-  const statusText = {
-    creating: 'Creating room...',
-    waiting: 'Waiting for viewfinder to connect...',
-    paired: 'Starting video stream...',
-    closed: 'Room closed',
-    disconnected: 'Viewfinder disconnected',
-    error: 'Failed to create room',
-  }[roomStatus] ?? roomStatus;
-
-  const statusColor = roomStatus === 'paired' ? '#4a9eff' : roomStatus === 'error' || roomStatus === 'disconnected' ? '#ff4a4a' : '#666';
+  // Status line
+  const paired = streaming || roomStatus === 'paired';
+  const statusText = paired
+    ? (captureStatus === 'recording' ? 'Recording...' : captureStatus === 'sending' ? 'Sending...' : 'Streaming')
+    : roomStatus === 'waiting' ? 'Waiting for viewfinder...'
+    : roomStatus === 'creating' ? 'Starting...'
+    : roomStatus === 'disconnected' ? 'Disconnected'
+    : roomStatus === 'error' ? 'Error' : roomStatus;
 
   return (
     <View style={styles.container}>
-      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-        <Pressable onPress={handleBack} style={styles.backButton} accessibilityLabel="Go back" accessibilityRole="button">
-          <Text style={styles.backText}>← Back</Text>
-        </Pressable>
-        <Text style={styles.headerTitle}>Camera Mode</Text>
-      </View>
-
-      <View style={styles.content}>
-        <Text style={styles.instruction}>Scan this with the Viewfinder phone</Text>
-
-        {qrReady && qrPayload && QRCode ? (
-          <View style={styles.qrContainer}>
-            <QRCode value={qrPayload} size={220} backgroundColor="#fff" color="#000" />
-          </View>
-        ) : null}
-
-        <Text style={styles.orText}>or enter this code manually</Text>
-
-        <View style={styles.codeContainer}>
-          <Text style={styles.numericCode}>{numericCode}</Text>
+      {/* Full-screen camera preview (webrtc local stream) */}
+      {localStreamUrl ? (
+        <RTCView
+          streamURL={localStreamUrl}
+          style={StyleSheet.absoluteFill}
+          objectFit="cover"
+          mirror={false}
+          zOrder={0}
+        />
+      ) : (
+        <View style={[StyleSheet.absoluteFill, styles.loadingBg]}>
+          <Text style={styles.loadingText}>Starting camera...</Text>
         </View>
+      )}
 
-        <Text style={[styles.status, { color: statusColor }]}>{statusText}</Text>
+      {/* Vision Camera for high-res capture — only active during capture */}
+      {VisionCameraComponent && visionCameraActive && (
+        <VisionCameraCapture
+          CameraComponent={VisionCameraComponent}
+          useCameraDevice={useCameraDeviceHook}
+          cameraRef={visionCameraRef}
+          zoom={zoomRef.current}
+          audio={visionCameraAudio}
+          onInitialized={() => {
+            visionCameraReadyRef.current = true;
+            rlog.info('camera', 'Vision camera initialized');
+          }}
+          onError={(err: any) => rlog.error('camera', 'Vision camera error', { error: err?.message })}
+        />
+      )}
+
+      {/* Top bar */}
+      <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
+        <Pressable onPress={handleBack} style={styles.pillButton} accessibilityLabel="Disconnect" accessibilityRole="button">
+          <Text style={styles.pillText}>← {streaming ? 'End' : 'Back'}</Text>
+        </Pressable>
+
+        <View style={[styles.statusPill, { backgroundColor: paired ? 'rgba(74,255,158,0.25)' : 'rgba(255,255,255,0.15)' }]}>
+          <Text style={[styles.statusText, { color: paired ? '#4aff9e' : '#aaa' }]}>
+            {paired ? '● ' : ''}{statusText}
+          </Text>
+        </View>
       </View>
+
+      {/* QR overlay — shown before pairing */}
+      {!paired && qrReady && qrPayload && QRCode && (
+        <View style={styles.qrOverlay}>
+          <View style={styles.qrCard}>
+            <QRCode value={qrPayload} size={140} backgroundColor="#fff" color="#000" />
+          </View>
+          <Text style={styles.qrLabel}>Scan with viewfinder phone</Text>
+          <View style={styles.codePill}>
+            <Text style={styles.codeText}>{numericCode}</Text>
+          </View>
+        </View>
+      )}
+
+      {/* Capture feedback overlays */}
+      {captureStatus === 'capturing' && (
+        <View style={styles.flashOverlay} pointerEvents="none" />
+      )}
+      {captureStatus === 'done' && (
+        <View style={styles.toast} pointerEvents="none">
+          <Text style={styles.toastText}>Photo sent</Text>
+        </View>
+      )}
+      {captureStatus === 'sending' && (
+        <View style={styles.toast} pointerEvents="none">
+          <Text style={styles.toastText}>Sending...</Text>
+        </View>
+      )}
+      {captureStatus === 'recording' && (
+        <View style={styles.recIndicator} pointerEvents="none">
+          <Text style={styles.recText}>● REC</Text>
+        </View>
+      )}
+
+      {/* Bottom info */}
+      <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 16 }]}>
+        {!paired && <Text style={styles.bottomHint}>Point the Viewfinder phone at the QR code above</Text>}
+        {paired && <Text style={styles.streamInfo}>720p · 30fps · H.264</Text>}
+      </View>
+    </View>
+  );
+}
+
+/** Vision Camera for high-res capture — rendered at 1x1 pixel, invisible to user */
+function VisionCameraCapture({
+  CameraComponent,
+  useCameraDevice,
+  cameraRef,
+  zoom,
+  audio,
+  onInitialized,
+  onError,
+}: {
+  CameraComponent: any;
+  useCameraDevice: any;
+  cameraRef: any;
+  zoom: number;
+  audio: boolean;
+  onInitialized: () => void;
+  onError: (err: any) => void;
+}) {
+  const device = useCameraDevice('back');
+  if (!device) return null;
+
+  return (
+    <View style={styles.hiddenCamera} pointerEvents="none">
+      <CameraComponent
+        ref={cameraRef}
+        style={{ width: 1, height: 1 }}
+        device={device}
+        isActive={true}
+        photo={true}
+        video={true}
+        audio={audio}
+        zoom={zoom}
+        onInitialized={onInitialized}
+        onError={onError}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
-  header: { paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center' },
-  backButton: { padding: 8 },
-  backText: { color: '#4a9eff', fontSize: 16 },
-  headerTitle: { color: '#fff', fontSize: 18, fontWeight: '600', marginLeft: 12 },
-  content: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  instruction: { color: '#ccc', fontSize: 16, marginBottom: 24, textAlign: 'center' },
-  qrContainer: { padding: 16, backgroundColor: '#fff', borderRadius: 16, marginBottom: 24 },
-  orText: { color: '#666', fontSize: 14, marginBottom: 12 },
-  codeContainer: { paddingHorizontal: 32, paddingVertical: 16, backgroundColor: '#1a1a2e', borderRadius: 12, borderWidth: 1, borderColor: '#4a9eff', marginBottom: 32 },
-  numericCode: { color: '#4a9eff', fontSize: 36, fontWeight: 'bold', letterSpacing: 8, fontVariant: ['tabular-nums'] },
-  status: { fontSize: 16, fontWeight: '500' },
-  streamingBadge: { backgroundColor: 'rgba(74,255,158,0.2)', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 8, marginLeft: 'auto', marginRight: 0 },
-  streamingText: { color: '#4aff9e', fontSize: 14, fontWeight: 'bold' },
-  streamContent: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  streamTitle: { color: '#fff', fontSize: 24, fontWeight: 'bold', marginBottom: 8 },
-  streamInfo: { color: '#888', fontSize: 14, marginBottom: 32 },
-  pipContainer: { width: 240, height: 320, borderRadius: 16, overflow: 'hidden', borderWidth: 2, borderColor: '#4aff9e' },
-  pipView: { width: '100%', height: '100%' },
-  captureOverlay: { position: 'absolute', bottom: 100, backgroundColor: 'rgba(0,0,0,0.7)', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 },
-  captureText: { color: '#fff', fontSize: 18, fontWeight: '600' },
+  loadingBg: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#111' },
+  loadingText: { color: '#666', fontSize: 16 },
+
+  // Top bar
+  topBar: {
+    position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10,
+    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, gap: 8,
+  },
+  pillButton: {
+    backgroundColor: 'rgba(0,0,0,0.5)', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
+  },
+  pillText: { color: '#4aff9e', fontSize: 15, fontWeight: '600' },
+  statusPill: {
+    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, marginLeft: 'auto',
+  },
+  statusText: { fontSize: 13, fontWeight: '600' },
+
+  // QR overlay
+  qrOverlay: {
+    position: 'absolute', top: '22%', alignSelf: 'center', zIndex: 5,
+    alignItems: 'center',
+  },
+  qrCard: {
+    padding: 12, backgroundColor: '#fff', borderRadius: 16,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.5, shadowRadius: 12, elevation: 8,
+  },
+  qrLabel: { color: '#fff', fontSize: 14, marginTop: 12, textShadowColor: '#000', textShadowRadius: 6 },
+  codePill: {
+    marginTop: 8, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 20, paddingVertical: 8, borderRadius: 12,
+    borderWidth: 1, borderColor: 'rgba(74,158,255,0.5)',
+  },
+  codeText: { color: '#4a9eff', fontSize: 22, fontWeight: 'bold', letterSpacing: 6, fontVariant: ['tabular-nums'] },
+
+  // Capture overlays
+  flashOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(255,255,255,0.6)', zIndex: 15 },
+  toast: {
+    position: 'absolute', top: '45%', alignSelf: 'center', zIndex: 15,
+    backgroundColor: 'rgba(0,0,0,0.7)', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12,
+  },
+  toastText: { color: '#4aff9e', fontSize: 18, fontWeight: '600' },
+  recIndicator: {
+    position: 'absolute', top: '12%', alignSelf: 'center', zIndex: 15,
+    backgroundColor: 'rgba(255,0,0,0.8)', paddingHorizontal: 16, paddingVertical: 6, borderRadius: 8,
+  },
+  recText: { color: '#fff', fontSize: 15, fontWeight: 'bold' },
+
+  // Bottom
+  bottomBar: {
+    position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 5,
+    alignItems: 'center', paddingHorizontal: 24,
+  },
+  bottomHint: { color: 'rgba(255,255,255,0.6)', fontSize: 14, textAlign: 'center' },
+  streamInfo: { color: 'rgba(255,255,255,0.5)', fontSize: 12, textAlign: 'center' },
+
+  // Hidden vision camera
+  hiddenCamera: {
+    position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0,
+  },
 });
