@@ -170,23 +170,10 @@ export default function CameraScreen() {
     if (url) setLocalStreamUrl(url);
   }, []);
 
-  // Save captured media to the camera phone's gallery too — durability if the
-  // viewfinder disconnects mid-transfer, or the user wants the photo on both phones.
-  const saveToLocalGallery = useCallback(async (path: string) => {
-    try {
-      const MediaLibrary = require('expo-media-library') as typeof import('expo-media-library');
-      const { status } = await MediaLibrary.requestPermissionsAsync();
-      if (status !== 'granted') {
-        rlog.warn('camera', 'Local media-library permission denied');
-        return;
-      }
-      const uri = path.startsWith('file://') ? path : `file://${path}`;
-      await MediaLibrary.saveToLibraryAsync(uri);
-      rlog.info('camera', 'Saved to local gallery', { uri });
-    } catch (e: any) {
-      rlog.error('camera', 'Local gallery save failed', { error: e?.message });
-    }
-  }, []);
+  // Intentionally no local-gallery save on the camera phone.
+  // Why: the camera phone is a "sensor" for the viewfinder user; cluttering its photo
+  // library with every shot isn't desired. Photos go to the viewfinder via data channel.
+  // Trade-off: if transfer fails mid-flight the shot is lost — acceptable for MVP.
 
   // ── Photo capture ──
   const handleCapturePhoto = useCallback(async () => {
@@ -201,12 +188,13 @@ export default function CameraScreen() {
       }
       const photo = await camera.takePhoto({
         qualityPrioritization: 'quality',
-        enableShutterSound: true,
+        // Why disabled: the camera phone is held silently by one user; the shutter sound
+        // confused testers who expected the noise on the viewfinder (where the button is).
+        enableShutterSound: false,
       });
       rlog.info('camera', 'Photo captured', { path: photo.path, width: photo.width, height: photo.height });
 
       const photoPath = photo.path.startsWith('file://') ? photo.path : `file://${photo.path}`;
-      await saveToLocalGallery(photoPath);
 
       await deactivateVisionCamera();
 
@@ -221,7 +209,7 @@ export default function CameraScreen() {
       setCaptureStatus(null);
       await deactivateVisionCamera();
     }
-  }, [activateVisionCamera, deactivateVisionCamera, saveToLocalGallery]);
+  }, [activateVisionCamera, deactivateVisionCamera]);
 
   // ── Video recording ──
   const handleStartRecording = useCallback(async () => {
@@ -240,7 +228,6 @@ export default function CameraScreen() {
         onRecordingFinished: async (video: any) => {
           rlog.info('camera', 'Video recorded', { path: video.path, duration: video.duration });
           const videoPath = video.path.startsWith('file://') ? video.path : `file://${video.path}`;
-          await saveToLocalGallery(videoPath);
           await deactivateVisionCamera();
           setCaptureStatus('sending');
           sendDataMessage({ type: 'record-done', duration: video.duration });
@@ -263,7 +250,7 @@ export default function CameraScreen() {
       setCaptureStatus(null);
       setIsRecording(false);
     }
-  }, [activateVisionCamera, deactivateVisionCamera, saveToLocalGallery]);
+  }, [activateVisionCamera, deactivateVisionCamera]);
 
   const handleStopRecording = useCallback(async () => {
     rlog.info('camera', 'Record stop command received');
