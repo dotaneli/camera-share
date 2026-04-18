@@ -22,7 +22,7 @@
         "NSPhotoLibraryAddUsageDescription": "CameraShare saves photos and videos to your photo library",
         "ITSAppUsesNonExemptEncryption": false
       },
-      "buildNumber": "5"
+      "buildNumber": "6"
     },
     "android": {
       "adaptiveIcon": {
