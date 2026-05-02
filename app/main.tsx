@@ -7,7 +7,7 @@ import { useAppStore } from '../lib/store';
 import { generateRoomId, deriveNumericCode, encodeQRPayload } from '../lib/pairing';
 import { createRoom, deleteRoom, onRoomStatusChange } from '../lib/firebase';
 import {
-  startAsCamera, cleanupWebRTC, onDataMessage, sendDataMessage,
+  startAsMain, cleanupWebRTC, onDataMessage, sendDataMessage,
   initPreviewStream, getLocalStreamUrl, setHardwareZoom,
   pauseCameraCapture, resumeCameraCapture,
 } from '../lib/webrtc';
@@ -16,7 +16,7 @@ import { rlog } from '../lib/remote-logger';
 
 let QRCode: any = null;
 
-export default function CameraScreen() {
+export default function MainScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const resetRole = useAppStore((s) => s.resetRole);
@@ -50,14 +50,14 @@ export default function CameraScreen() {
 
   // Start camera preview immediately on mount
   useEffect(() => {
-    rlog.info('camera', 'CameraScreen mounted');
+    rlog.info('main', 'MainScreen mounted');
 
     // Load QR library
     try {
       QRCode = require('react-native-qrcode-svg').default;
       setQrReady(true);
     } catch (e: any) {
-      rlog.fatal('camera', 'QR library failed', { error: e?.message });
+      rlog.fatal('main', 'QR library failed', { error: e?.message });
     }
 
     // Pre-request vision-camera permissions so the first shutter doesn't stall on a prompt.
@@ -69,24 +69,24 @@ export default function CameraScreen() {
         const camStatus = await VC.Camera.getCameraPermissionStatus();
         if (camStatus !== 'granted') {
           const r = await VC.Camera.requestCameraPermission();
-          rlog.info('camera', 'Pre-warmed camera permission', { result: r });
+          rlog.info('main', 'Pre-warmed camera permission', { result: r });
         }
         const micStatus = await VC.Camera.getMicrophonePermissionStatus();
         if (micStatus !== 'granted') {
           const r = await VC.Camera.requestMicrophonePermission();
-          rlog.info('camera', 'Pre-warmed microphone permission', { result: r });
+          rlog.info('main', 'Pre-warmed microphone permission', { result: r });
         }
       } catch (e: any) {
-        rlog.warn('camera', 'Permission pre-warm failed', { error: e?.message });
+        rlog.warn('main', 'Permission pre-warm failed', { error: e?.message });
       }
     })();
 
     // Start a preview-only stream (separate from peer connection stream)
     initPreviewStream().then((url) => {
       setLocalStreamUrl(url);
-      rlog.info('camera', 'Camera preview started');
+      rlog.info('main', 'Camera preview started');
     }).catch((e: any) => {
-      rlog.fatal('camera', 'Camera preview failed', { error: e?.message });
+      rlog.fatal('main', 'Camera preview failed', { error: e?.message });
     });
 
     // Create room for pairing
@@ -101,12 +101,12 @@ export default function CameraScreen() {
       setRoomStatus(success ? 'waiting' : 'error');
     });
 
-    // Handle incoming commands from viewfinder
+    // Handle incoming commands from assistant
     onDataMessage(async (msg) => {
       if (msg.type === 'zoom') {
         zoomRef.current = msg.level ?? 1;
         setHardwareZoom(zoomRef.current);
-        rlog.info('camera', 'Zoom updated', { zoom: zoomRef.current });
+        rlog.info('main', 'Zoom updated', { zoom: zoomRef.current });
       } else if (msg.type === 'shutter') {
         handleCapturePhoto();
       } else if (msg.type === 'record-start') {
@@ -114,26 +114,26 @@ export default function CameraScreen() {
       } else if (msg.type === 'record-stop') {
         handleStopRecording();
       } else if (msg.type === 'disconnect') {
-        rlog.info('camera', 'Remote disconnect received');
+        rlog.info('main', 'Remote disconnect received');
         cleanupWebRTC(roomIdRef.current);
         setStreaming(false);
         setRoomStatus('disconnected');
       }
     });
 
-    // Listen for viewfinder joining
+    // Listen for assistant joining
     const unsubscribe = onRoomStatusChange(id, async (status) => {
       setRoomStatus(status);
       if (status === 'paired') {
-        rlog.info('camera', 'Viewfinder connected — starting WebRTC');
+        rlog.info('main', 'Assistant connected — starting WebRTC');
         try {
-          await startAsCamera(id);
+          await startAsMain(id);
           setStreaming(true);
           // Update preview to use the peer connection's fresh stream
           setLocalStreamUrl(getLocalStreamUrl());
-          rlog.info('camera', 'WebRTC streaming started');
+          rlog.info('main', 'WebRTC streaming started');
         } catch (e: any) {
-          rlog.fatal('camera', 'WebRTC start failed', { error: e?.message });
+          rlog.fatal('main', 'WebRTC start failed', { error: e?.message });
         }
       }
     });
@@ -155,7 +155,7 @@ export default function CameraScreen() {
     setVisionCameraActive(true);
     const ready = await waitForVisionCamera();
     if (!ready) {
-      rlog.error('camera', 'Vision camera never initialized');
+      rlog.error('main', 'Vision camera never initialized');
       setVisionCameraActive(false);
       await resumeCameraCapture().then((url) => url && setLocalStreamUrl(url));
       return null;
@@ -170,14 +170,14 @@ export default function CameraScreen() {
     if (url) setLocalStreamUrl(url);
   }, []);
 
-  // Intentionally no local-gallery save on the camera phone.
-  // Why: the camera phone is a "sensor" for the viewfinder user; cluttering its photo
-  // library with every shot isn't desired. Photos go to the viewfinder via data channel.
+  // Intentionally no local-gallery save on the main phone.
+  // Why: the main phone is a "sensor" for the assistant user; cluttering its photo
+  // library with every shot isn't desired. Photos go to the assistant via data channel.
   // Trade-off: if transfer fails mid-flight the shot is lost — acceptable for MVP.
 
   // ── Photo capture ──
   const handleCapturePhoto = useCallback(async () => {
-    rlog.info('camera', 'Shutter command received');
+    rlog.info('main', 'Shutter command received');
     setCaptureStatus('capturing');
     try {
       const camera = await activateVisionCamera(false);
@@ -188,11 +188,11 @@ export default function CameraScreen() {
       }
       const photo = await camera.takePhoto({
         qualityPrioritization: 'quality',
-        // Why disabled: the camera phone is held silently by one user; the shutter sound
-        // confused testers who expected the noise on the viewfinder (where the button is).
+        // Why disabled: the main phone is held silently by one user; the shutter sound
+        // confused testers who expected the noise on the assistant (where the button is).
         enableShutterSound: false,
       });
-      rlog.info('camera', 'Photo captured', { path: photo.path, width: photo.width, height: photo.height });
+      rlog.info('main', 'Photo captured', { path: photo.path, width: photo.width, height: photo.height });
 
       const photoPath = photo.path.startsWith('file://') ? photo.path : `file://${photo.path}`;
 
@@ -204,7 +204,7 @@ export default function CameraScreen() {
       setCaptureStatus('done');
       setTimeout(() => setCaptureStatus(null), 2000);
     } catch (e: any) {
-      rlog.error('camera', 'Capture failed', { error: e?.message });
+      rlog.error('main', 'Capture failed', { error: e?.message });
       sendDataMessage({ type: 'shutter-done', success: false, error: e?.message });
       setCaptureStatus(null);
       await deactivateVisionCamera();
@@ -213,7 +213,7 @@ export default function CameraScreen() {
 
   // ── Video recording ──
   const handleStartRecording = useCallback(async () => {
-    rlog.info('camera', 'Record start command received');
+    rlog.info('main', 'Record start command received');
     setIsRecording(true);
     setCaptureStatus('recording');
     try {
@@ -226,7 +226,7 @@ export default function CameraScreen() {
       }
       camera.startRecording({
         onRecordingFinished: async (video: any) => {
-          rlog.info('camera', 'Video recorded', { path: video.path, duration: video.duration });
+          rlog.info('main', 'Video recorded', { path: video.path, duration: video.duration });
           const videoPath = video.path.startsWith('file://') ? video.path : `file://${video.path}`;
           await deactivateVisionCamera();
           setCaptureStatus('sending');
@@ -236,7 +236,7 @@ export default function CameraScreen() {
           setIsRecording(false);
         },
         onRecordingError: async (error: any) => {
-          rlog.error('camera', 'Recording error', { error: error?.message });
+          rlog.error('main', 'Recording error', { error: error?.message });
           await deactivateVisionCamera();
           sendDataMessage({ type: 'record-done', error: error?.message });
           setCaptureStatus(null);
@@ -245,7 +245,7 @@ export default function CameraScreen() {
       });
       sendDataMessage({ type: 'record-ack', recording: true });
     } catch (e: any) {
-      rlog.error('camera', 'Start recording failed', { error: e?.message });
+      rlog.error('main', 'Start recording failed', { error: e?.message });
       await deactivateVisionCamera();
       setCaptureStatus(null);
       setIsRecording(false);
@@ -253,20 +253,20 @@ export default function CameraScreen() {
   }, [activateVisionCamera, deactivateVisionCamera]);
 
   const handleStopRecording = useCallback(async () => {
-    rlog.info('camera', 'Record stop command received');
+    rlog.info('main', 'Record stop command received');
     try {
       const camera = visionCameraRef.current;
       if (camera) {
         await camera.stopRecording();
       }
     } catch (e: any) {
-      rlog.error('camera', 'Stop recording failed', { error: e?.message });
+      rlog.error('main', 'Stop recording failed', { error: e?.message });
     }
   }, []);
 
   // ── Disconnect ──
   const handleBack = () => {
-    rlog.info('camera', 'Leaving camera mode');
+    rlog.info('main', 'Leaving main mode');
     sendDataMessage({ type: 'disconnect' });
     cleanupWebRTC(roomId);
     resetRole();
@@ -286,7 +286,7 @@ export default function CameraScreen() {
   const paired = streaming || roomStatus === 'paired';
   const statusText = paired
     ? (captureStatus === 'recording' ? 'Recording...' : captureStatus === 'sending' ? 'Sending...' : 'Streaming')
-    : roomStatus === 'waiting' ? 'Waiting for viewfinder...'
+    : roomStatus === 'waiting' ? 'Waiting for assistant...'
     : roomStatus === 'creating' ? 'Starting...'
     : roomStatus === 'disconnected' ? 'Disconnected'
     : roomStatus === 'error' ? 'Error' : roomStatus;
@@ -321,9 +321,9 @@ export default function CameraScreen() {
           audio={visionCameraAudio}
           onInitialized={() => {
             visionCameraReadyRef.current = true;
-            rlog.info('camera', 'Vision camera initialized');
+            rlog.info('main', 'Vision camera initialized');
           }}
-          onError={(err: any) => rlog.error('camera', 'Vision camera error', { error: err?.message })}
+          onError={(err: any) => rlog.error('main', 'Vision camera error', { error: err?.message })}
         />
       )}
 
@@ -346,7 +346,7 @@ export default function CameraScreen() {
           <View style={styles.qrCard}>
             <QRCode value={qrPayload} size={140} backgroundColor="#fff" color="#000" />
           </View>
-          <Text style={styles.qrLabel}>Scan with viewfinder phone</Text>
+          <Text style={styles.qrLabel}>Scan with assistant phone</Text>
           <View style={styles.codePill}>
             <Text style={styles.codeText}>{numericCode}</Text>
           </View>
@@ -378,7 +378,7 @@ export default function CameraScreen() {
 
       {/* Bottom info */}
       <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 16 }]}>
-        {!paired && <Text style={styles.bottomHint}>Point the Viewfinder phone at the QR code above</Text>}
+        {!paired && <Text style={styles.bottomHint}>Point the assistant phone at the QR code above</Text>}
         {paired && <Text style={styles.streamInfo}>720p · 30fps · H.264</Text>}
       </View>
     </View>

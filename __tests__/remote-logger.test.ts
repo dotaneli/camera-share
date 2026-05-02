@@ -110,9 +110,9 @@ describe('rlog level helpers', () => {
   });
 
   it('each helper forwards tag + message + extra exactly', () => {
-    rlog.info('camera', 'photo captured', { w: 4080, h: 3072 });
+    rlog.info('main', 'photo captured', { w: 4080, h: 3072 });
     const body = readBody();
-    expect(body).toMatchObject({ lvl: 'info', tag: 'camera', msg: 'photo captured' });
+    expect(body).toMatchObject({ lvl: 'info', tag: 'main', msg: 'photo captured' });
     expect(JSON.parse(body.extra)).toEqual({ w: 4080, h: 3072 });
   });
 });

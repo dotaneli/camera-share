@@ -10,25 +10,25 @@ describe('AppStore', () => {
     expect(useAppStore.getState().role).toBeNull();
   });
 
-  it('sets role to camera', () => {
-    useAppStore.getState().setRole('camera');
-    expect(useAppStore.getState().role).toBe('camera');
+  it('sets role to main', () => {
+    useAppStore.getState().setRole('main');
+    expect(useAppStore.getState().role).toBe('main');
   });
 
-  it('sets role to viewfinder', () => {
-    useAppStore.getState().setRole('viewfinder');
-    expect(useAppStore.getState().role).toBe('viewfinder');
+  it('sets role to assistant', () => {
+    useAppStore.getState().setRole('assistant');
+    expect(useAppStore.getState().role).toBe('assistant');
   });
 
   it('resets role to null', () => {
-    useAppStore.getState().setRole('camera');
+    useAppStore.getState().setRole('main');
     useAppStore.getState().resetRole();
     expect(useAppStore.getState().role).toBeNull();
   });
 
   it('can switch roles', () => {
-    useAppStore.getState().setRole('camera');
-    useAppStore.getState().setRole('viewfinder');
-    expect(useAppStore.getState().role).toBe('viewfinder');
+    useAppStore.getState().setRole('main');
+    useAppStore.getState().setRole('assistant');
+    expect(useAppStore.getState().role).toBe('assistant');
   });
 });

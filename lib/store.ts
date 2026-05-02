@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type Role = 'camera' | 'viewfinder' | null;
+export type Role = 'main' | 'assistant' | null;
 
 interface AppState {
   role: Role;

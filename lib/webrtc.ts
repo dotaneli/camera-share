@@ -163,7 +163,7 @@ async function getLocalStream(): Promise<MediaStream> {
 /** Create peer connection and set up ICE candidate exchange via Firebase */
 function createPeerConnection(
   roomId: string,
-  role: 'camera' | 'viewfinder',
+  role: 'main' | 'assistant',
   onRemoteStream: (stream: MediaStream) => void,
 ): RTCPeerConnection {
   rlog.info('webrtc', 'Creating peer connection', { role });
@@ -180,7 +180,7 @@ function createPeerConnection(
 
   // Send ICE candidates to Firebase
   const myRole = role;
-  const otherRole = role === 'camera' ? 'viewfinder' : 'camera';
+  const otherRole = role === 'main' ? 'assistant' : 'main';
 
   pc.addEventListener('icecandidate', (event: any) => {
     if (event.candidate) {
@@ -209,8 +209,8 @@ function createPeerConnection(
 }
 
 /** Start listening for remote ICE candidates — call AFTER remote description is set */
-function listenForIceCandidates(roomId: string, role: 'camera' | 'viewfinder', pc: any) {
-  const otherRole = role === 'camera' ? 'viewfinder' : 'camera';
+function listenForIceCandidates(roomId: string, role: 'main' | 'assistant', pc: any) {
+  const otherRole = role === 'main' ? 'assistant' : 'main';
   database()
     .ref(`/rooms/${roomId}/iceCandidates/${otherRole}`)
     .on('child_added', (snapshot) => {
@@ -223,17 +223,17 @@ function listenForIceCandidates(roomId: string, role: 'camera' | 'viewfinder', p
     });
 }
 
-/** Camera phone: create offer and start streaming */
-export async function startAsCamera(
+/** Main (camera-bearing) phone: create offer and start streaming */
+export async function startAsMain(
   roomId: string,
 ): Promise<{ localStream: MediaStream; peerConnection: RTCPeerConnection }> {
-  rlog.info('webrtc', 'Starting as camera');
+  rlog.info('webrtc', 'Starting as main');
 
   // Always create a fresh stream for the peer connection
   // (preview stream is separate and will be released when this grabs the camera)
   localStream = await getLocalStream();
-  peerConnection = createPeerConnection(roomId, 'camera', () => {
-    // Camera doesn't need remote stream
+  peerConnection = createPeerConnection(roomId, 'main', () => {
+    // Main doesn't need remote stream
   });
 
   // Add local tracks to peer connection
@@ -242,10 +242,10 @@ export async function startAsCamera(
   });
   rlog.info('webrtc', 'Local tracks added to peer connection');
 
-  // Create data channel (camera is the initiator)
+  // Create data channel (main is the initiator)
   dataChannel = (peerConnection as any).createDataChannel('control', { ordered: true });
-  dataChannel.onopen = () => rlog.info('webrtc', 'Data channel opened (camera)');
-  dataChannel.onclose = () => rlog.info('webrtc', 'Data channel closed (camera)');
+  dataChannel.onopen = () => rlog.info('webrtc', 'Data channel opened (main)');
+  dataChannel.onclose = () => rlog.info('webrtc', 'Data channel closed (main)');
   dataChannel.onmessage = (event: any) => {
     try {
       const msg = JSON.parse(event.data);
@@ -274,32 +274,32 @@ export async function startAsCamera(
     .on('value', async (snapshot) => {
       const answer = snapshot.val();
       if (answer && answer.sdp && peerConnection && !peerConnection.remoteDescription) {
-        rlog.info('webrtc', 'Answer received from viewfinder');
+        rlog.info('webrtc', 'Answer received from assistant');
         await peerConnection.setRemoteDescription(
           new RTCSessionDescription(answer),
         );
         rlog.info('webrtc', 'Remote description set — starting ICE exchange');
-        listenForIceCandidates(roomId, 'camera', peerConnection);
+        listenForIceCandidates(roomId, 'main', peerConnection);
       }
     });
 
   return { localStream, peerConnection };
 }
 
-/** Viewfinder phone: receive offer, send answer, get remote stream */
-export async function startAsViewfinder(
+/** Assistant (viewer/controller) phone: receive offer, send answer, get remote stream */
+export async function startAsAssistant(
   roomId: string,
   onRemoteStream: (stream: MediaStream) => void,
 ): Promise<RTCPeerConnection> {
-  rlog.info('webrtc', 'Starting as viewfinder');
+  rlog.info('webrtc', 'Starting as assistant');
 
-  peerConnection = createPeerConnection(roomId, 'viewfinder', onRemoteStream);
+  peerConnection = createPeerConnection(roomId, 'assistant', onRemoteStream);
 
-  // Listen for data channel from camera
+  // Listen for data channel from main
   (peerConnection as any).addEventListener('datachannel', (event: any) => {
     dataChannel = event.channel;
-    dataChannel.onopen = () => rlog.info('webrtc', 'Data channel opened (viewfinder)');
-    dataChannel.onclose = () => rlog.info('webrtc', 'Data channel closed (viewfinder)');
+    dataChannel.onopen = () => rlog.info('webrtc', 'Data channel opened (assistant)');
+    dataChannel.onclose = () => rlog.info('webrtc', 'Data channel closed (assistant)');
     dataChannel.onmessage = (evt: any) => {
       try {
         const msg = JSON.parse(evt.data);
@@ -311,8 +311,8 @@ export async function startAsViewfinder(
     };
   });
 
-  // Wait for offer to appear in Firebase (camera may still be creating it)
-  rlog.info('webrtc', 'Waiting for offer from camera...');
+  // Wait for offer to appear in Firebase (main may still be creating it)
+  rlog.info('webrtc', 'Waiting for offer from main...');
   const offer = await new Promise<any>((resolve, reject) => {
     const timeout = setTimeout(() => {
       ref.off('value', listener);
@@ -330,11 +330,11 @@ export async function startAsViewfinder(
     });
   });
 
-  rlog.info('webrtc', 'Offer received from camera');
+  rlog.info('webrtc', 'Offer received from main');
   await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
 
   // Now safe to listen for ICE candidates
-  listenForIceCandidates(roomId, 'viewfinder', peerConnection);
+  listenForIceCandidates(roomId, 'assistant', peerConnection);
 
   // Create and set answer
   const answer = await peerConnection.createAnswer();

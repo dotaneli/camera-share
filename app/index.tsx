@@ -14,7 +14,7 @@ export default function RoleSelectScreen() {
 
   rlog.info('app', 'RoleSelectScreen rendering');
 
-  const handleRole = (role: 'camera' | 'viewfinder') => {
+  const handleRole = (role: 'main' | 'assistant') => {
     rlog.info('app', `Role selected: ${role}`);
     setRole(role);
     router.push(`/${role}`);
@@ -23,29 +23,29 @@ export default function RoleSelectScreen() {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>CameraShare</Text>
-      <Text style={styles.subtitle}>Choose your role</Text>
+      <Text style={styles.subtitle}>Which phone is this?</Text>
 
       <View style={styles.buttons}>
         <Pressable
           style={({ pressed }) => [styles.button, styles.cameraButton, pressed && styles.pressed]}
-          onPress={() => handleRole('camera')}
-          accessibilityLabel="I'm the Camera"
+          onPress={() => handleRole('main')}
+          accessibilityLabel="I'm placing this phone"
           accessibilityRole="button"
         >
           <Text style={styles.buttonEmoji}>📷</Text>
-          <Text style={styles.buttonTitle}>I'm the Camera</Text>
-          <Text style={styles.buttonDesc}>This phone takes the photos</Text>
+          <Text style={styles.buttonTitle}>I'm placing this phone</Text>
+          <Text style={styles.buttonDesc}>This phone holds the camera and points at the subject</Text>
         </Pressable>
 
         <Pressable
           style={({ pressed }) => [styles.button, styles.viewfinderButton, pressed && styles.pressed]}
-          onPress={() => handleRole('viewfinder')}
-          accessibilityLabel="I'm the Viewfinder"
+          onPress={() => handleRole('assistant')}
+          accessibilityLabel="I'm holding this phone"
           accessibilityRole="button"
         >
-          <Text style={styles.buttonEmoji}>👁</Text>
-          <Text style={styles.buttonTitle}>I'm the Viewfinder</Text>
-          <Text style={styles.buttonDesc}>This phone controls the shot</Text>
+          <Text style={styles.buttonEmoji}>👋</Text>
+          <Text style={styles.buttonTitle}>I'm holding this phone</Text>
+          <Text style={styles.buttonDesc}>This phone shows the live view, takes the shot, and saves the photos</Text>
         </Pressable>
       </View>
 

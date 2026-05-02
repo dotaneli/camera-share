@@ -42,8 +42,8 @@ export async function createRoom(roomId: string, numericCode: string): Promise<b
       metadata: {
         status: 'waiting',
         createdAt: database.ServerValue.TIMESTAMP,
-        cameraUid: uid,
-        viewfinderUid: null,
+        mainUid: uid,
+        assistantUid: null,
       },
     });
 
@@ -88,7 +88,7 @@ export async function joinRoom(roomId: string): Promise<boolean> {
     }
 
     await roomRef.child('metadata').update({
-      viewfinderUid: uid,
+      assistantUid: uid,
       status: 'paired',
     });
 

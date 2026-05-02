@@ -11,7 +11,7 @@ jest.mock('@react-native-firebase/auth', () => {
   });
 });
 
-let snapshotVal: any = { status: 'waiting', cameraUid: 'cam-uid' };
+let snapshotVal: any = { status: 'waiting', mainUid: 'main-uid' };
 const mockRef = {
   set: jest.fn().mockResolvedValue(undefined),
   update: jest.fn().mockResolvedValue(undefined),
@@ -51,7 +51,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   signInAnonymously.mockResolvedValue({ user: { uid: 'test-uid-123' } });
   currentUser = { uid: 'test-uid-123' };
-  snapshotVal = { status: 'waiting', cameraUid: 'cam-uid' };
+  snapshotVal = { status: 'waiting', mainUid: 'main-uid' };
 });
 
 describe('Firebase signaling', () => {
@@ -77,7 +77,7 @@ describe('Firebase signaling', () => {
 
   it('looks up numeric code', async () => {
     // Mock returns val() with roomId since we mocked snapshot above
-    // The actual mock returns { status: 'waiting', cameraUid: 'cam-uid' }
+    // The actual mock returns { status: 'waiting', mainUid: 'main-uid' }
     // which doesn't have roomId, so this should return null
     const result = await lookupNumericCode('123456');
     expect(result).toBeNull();
@@ -104,7 +104,7 @@ describe('Firebase signaling: edge cases', () => {
   });
 
   it('joinRoom rejects rooms that are not in "waiting" state', async () => {
-    snapshotVal = { status: 'paired', cameraUid: 'cam-uid' };
+    snapshotVal = { status: 'paired', mainUid: 'main-uid' };
     const result = await joinRoom('taken-room');
     expect(result).toBe(false);
     expect(rlogMock.warn).toHaveBeenCalledWith(

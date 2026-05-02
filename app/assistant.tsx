@@ -6,7 +6,7 @@ import { decodeQRPayload } from '../lib/pairing';
 import { useAppStore } from '../lib/store';
 import { rlog } from '../lib/remote-logger';
 import { joinRoom, lookupNumericCode } from '../lib/firebase';
-import { startAsViewfinder, cleanupWebRTC, sendDataMessage, onDataMessage } from '../lib/webrtc';
+import { startAsAssistant, cleanupWebRTC, sendDataMessage, onDataMessage } from '../lib/webrtc';
 import { handleTransferMessage, onTransferProgress, onTransferComplete } from '../lib/file-transfer';
 import { RTCView } from 'react-native-webrtc';
 
@@ -20,13 +20,13 @@ try {
 
 // Separate component for the camera — only rendered after lazy load
 function QRScanner({ onScanned }: { onScanned: (roomId: string) => void }) {
-  rlog.info('viewfinder', 'QRScanner: requiring vision-camera');
+  rlog.info('assistant', 'QRScanner: requiring vision-camera');
   let VisionCameraModule: any;
   try {
     VisionCameraModule = require('react-native-vision-camera');
-    rlog.info('viewfinder', 'QRScanner: require succeeded', { keys: Object.keys(VisionCameraModule).join(',') });
+    rlog.info('assistant', 'QRScanner: require succeeded', { keys: Object.keys(VisionCameraModule).join(',') });
   } catch (e: any) {
-    rlog.fatal('viewfinder', 'QRScanner: require FAILED', { error: e?.message });
+    rlog.fatal('assistant', 'QRScanner: require FAILED', { error: e?.message });
     return (
       <View style={styles.content}>
         <Text style={styles.errorText}>Camera module failed to load</Text>
@@ -36,9 +36,9 @@ function QRScanner({ onScanned }: { onScanned: (roomId: string) => void }) {
   }
 
   const { Camera, useCameraDevice, useCodeScanner } = VisionCameraModule;
-  rlog.info('viewfinder', 'QRScanner: calling useCameraDevice');
+  rlog.info('assistant', 'QRScanner: calling useCameraDevice');
   const device = useCameraDevice('back');
-  rlog.info('viewfinder', 'QRScanner: device result', { hasDevice: !!device });
+  rlog.info('assistant', 'QRScanner: device result', { hasDevice: !!device });
   const hasScanned = useRef(false);
 
   const codeScanner = useCodeScanner({
@@ -50,14 +50,14 @@ function QRScanner({ onScanned }: { onScanned: (roomId: string) => void }) {
       const result = decodeQRPayload(qrValue);
       if (result) {
         hasScanned.current = true;
-        rlog.info('viewfinder', 'QR scanned successfully');
+        rlog.info('assistant', 'QR scanned successfully');
         onScanned(result.roomId);
       }
     },
   });
 
   if (!device) {
-    rlog.warn('viewfinder', 'QRScanner: no camera device found');
+    rlog.warn('assistant', 'QRScanner: no camera device found');
     return (
       <View style={styles.content}>
         <Text style={styles.status}>No camera found</Text>
@@ -65,7 +65,7 @@ function QRScanner({ onScanned }: { onScanned: (roomId: string) => void }) {
     );
   }
 
-  rlog.info('viewfinder', 'QRScanner: rendering Camera component');
+  rlog.info('assistant', 'QRScanner: rendering Camera component');
   return (
     <Camera
       style={StyleSheet.absoluteFill}
@@ -76,7 +76,7 @@ function QRScanner({ onScanned }: { onScanned: (roomId: string) => void }) {
   );
 }
 
-export default function ViewfinderScreen() {
+export default function AssistantScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const resetRole = useAppStore((s) => s.resetRole);
@@ -94,7 +94,7 @@ export default function ViewfinderScreen() {
   const roomIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    rlog.info('viewfinder', 'ViewfinderScreen mounted');
+    rlog.info('assistant', 'AssistantScreen mounted');
 
     // File transfer callbacks
     onTransferProgress((received, total) => {
@@ -103,23 +103,23 @@ export default function ViewfinderScreen() {
     onTransferComplete((success, fileType) => {
       setTransferProgress(null);
       if (success) {
-        rlog.info('viewfinder', `${fileType} saved to gallery`);
+        rlog.info('assistant', `${fileType} saved to gallery`);
         setCaptureStatus('done');
         setTimeout(() => setCaptureStatus('idle'), 2500);
       } else {
-        rlog.error('viewfinder', `Failed to save ${fileType}`);
+        rlog.error('assistant', `Failed to save ${fileType}`);
         setCaptureStatus('idle');
         Alert.alert('Save failed', `Could not save the ${fileType} to your gallery.`);
       }
     });
 
-    // Handle incoming messages from camera
+    // Handle incoming messages from main
     onDataMessage((msg) => {
       // Check if it's a file transfer message first
       if (handleTransferMessage(msg)) return;
 
       if (msg.type === 'shutter-done') {
-        rlog.info('viewfinder', 'Shutter response', { success: msg.success });
+        rlog.info('assistant', 'Shutter response', { success: msg.success });
         if (msg.success) {
           setCaptureStatus('sending');
           // Safety timeout — if no file transfer starts within 10s, reset
@@ -128,35 +128,35 @@ export default function ViewfinderScreen() {
           setCaptureStatus('idle');
         }
       } else if (msg.type === 'record-done') {
-        rlog.info('viewfinder', 'Record stopped');
+        rlog.info('assistant', 'Record stopped');
         if (!msg.error) {
           setCaptureStatus('sending');
         }
         setIsRecording(false);
       } else if (msg.type === 'disconnect') {
-        rlog.info('viewfinder', 'Remote disconnect received');
+        rlog.info('assistant', 'Remote disconnect received');
         cleanupWebRTC(roomIdRef.current ?? undefined);
         setJoinStatus('failed');
         setRemoteStreamUrl(null);
-        Alert.alert('Disconnected', 'The camera phone disconnected.');
+        Alert.alert('Disconnected', 'The main phone disconnected.');
       }
     });
 
     (async () => {
       try {
-        rlog.info('viewfinder', 'Requesting camera permission');
+        rlog.info('assistant', 'Requesting camera permission');
         const VC = require('react-native-vision-camera');
         const status = await VC.Camera.getCameraPermissionStatus();
-        rlog.info('viewfinder', 'Permission status', { status });
+        rlog.info('assistant', 'Permission status', { status });
         if (status === 'granted') {
           setPermissionStatus('granted');
         } else {
           const result = await VC.Camera.requestCameraPermission();
-          rlog.info('viewfinder', 'Permission request result', { result });
+          rlog.info('assistant', 'Permission request result', { result });
           setPermissionStatus(result);
         }
       } catch (e: any) {
-        rlog.fatal('viewfinder', 'Permission check crashed', { error: e?.message });
+        rlog.fatal('assistant', 'Permission check crashed', { error: e?.message });
       }
     })();
   }, []);
@@ -165,7 +165,7 @@ export default function ViewfinderScreen() {
     setScannedRoomId(roomId);
     roomIdRef.current = roomId;
     setJoinStatus('joining');
-    rlog.info('viewfinder', 'Attempting to join room');
+    rlog.info('assistant', 'Attempting to join room');
     const success = await joinRoom(roomId);
     if (!success) {
       setJoinStatus('failed');
@@ -173,11 +173,11 @@ export default function ViewfinderScreen() {
     }
     setJoinStatus('joined');
 
-    // Start WebRTC — receive video from camera
+    // Start WebRTC — receive video from main
     try {
-      rlog.info('viewfinder', 'Starting WebRTC as viewfinder');
-      await startAsViewfinder(roomId, (stream) => {
-        rlog.info('viewfinder', 'Remote stream received!');
+      rlog.info('assistant', 'Starting WebRTC as assistant');
+      await startAsAssistant(roomId, (stream) => {
+        rlog.info('assistant', 'Remote stream received!');
         setRemoteStreamUrl((stream as any).toURL());
         setJoinStatus('streaming');
         // Route audio to loudspeaker — Android's WebRTC default is the earpiece.
@@ -185,14 +185,14 @@ export default function ViewfinderScreen() {
           try {
             InCallManager.start({ media: 'video' });
             InCallManager.setForceSpeakerphoneOn(true);
-            rlog.info('viewfinder', 'Audio routed to loudspeaker');
+            rlog.info('assistant', 'Audio routed to loudspeaker');
           } catch (e: any) {
-            rlog.warn('viewfinder', 'InCallManager.start failed', { error: e?.message });
+            rlog.warn('assistant', 'InCallManager.start failed', { error: e?.message });
           }
         }
       });
     } catch (e: any) {
-      rlog.fatal('viewfinder', 'WebRTC start failed', { error: e?.message });
+      rlog.fatal('assistant', 'WebRTC start failed', { error: e?.message });
     }
   };
 
@@ -205,7 +205,7 @@ export default function ViewfinderScreen() {
   };
 
   const handleBack = () => {
-    rlog.info('viewfinder', 'Leaving viewfinder mode');
+    rlog.info('assistant', 'Leaving assistant mode');
     stopInCallManager();
     resetRole();
     router.back();
@@ -213,7 +213,7 @@ export default function ViewfinderScreen() {
 
   const handleManualSubmit = async () => {
     if (manualCode.length === 6) {
-      rlog.info('viewfinder', 'Looking up numeric code');
+      rlog.info('assistant', 'Looking up numeric code');
       const roomId = await lookupNumericCode(manualCode);
       if (roomId) {
         handleJoinRoom(roomId);
@@ -310,18 +310,18 @@ export default function ViewfinderScreen() {
 
   const handleShutter = () => {
     if (captureStatus !== 'idle') return;
-    rlog.info('viewfinder', 'Shutter pressed');
+    rlog.info('assistant', 'Shutter pressed');
     setCaptureStatus('capturing');
     sendDataMessage({ type: 'shutter' });
   };
 
   const handleRecord = () => {
     if (isRecording) {
-      rlog.info('viewfinder', 'Stop recording pressed');
+      rlog.info('assistant', 'Stop recording pressed');
       sendDataMessage({ type: 'record-stop' });
       setIsRecording(false);
     } else {
-      rlog.info('viewfinder', 'Start recording pressed');
+      rlog.info('assistant', 'Start recording pressed');
       sendDataMessage({ type: 'record-start' });
       setIsRecording(true);
     }
