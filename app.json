@@ -22,7 +22,7 @@
         "NSPhotoLibraryAddUsageDescription": "CameraShare saves photos and videos to your photo library",
         "ITSAppUsesNonExemptEncryption": false
       },
-      "buildNumber": "7"
+      "buildNumber": "8"
     },
     "android": {
       "adaptiveIcon": {
@@ -32,7 +32,7 @@
       "edgeToEdgeEnabled": true,
       "package": "com.dotaneli.camerashare",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 1,
+      "versionCode": 2,
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
