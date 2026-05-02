@@ -10,6 +10,14 @@ import { startAsViewfinder, cleanupWebRTC, sendDataMessage, onDataMessage } from
 import { handleTransferMessage, onTransferProgress, onTransferComplete } from '../lib/file-transfer';
 import { RTCView } from 'react-native-webrtc';
 
+// Why: react-native-webrtc on Android defaults to MODE_IN_COMMUNICATION which routes audio
+// to the earpiece. For a remote-camera app the user expects loudspeaker playback.
+// InCallManager.setForceSpeakerphoneOn(true) flips the routing.
+let InCallManager: any = null;
+try {
+  InCallManager = require('react-native-incall-manager').default;
+} catch {}
+
 // Separate component for the camera — only rendered after lazy load
 function QRScanner({ onScanned }: { onScanned: (roomId: string) => void }) {
   rlog.info('viewfinder', 'QRScanner: requiring vision-camera');
@@ -172,14 +180,33 @@ export default function ViewfinderScreen() {
         rlog.info('viewfinder', 'Remote stream received!');
         setRemoteStreamUrl((stream as any).toURL());
         setJoinStatus('streaming');
+        // Route audio to loudspeaker — Android's WebRTC default is the earpiece.
+        if (InCallManager) {
+          try {
+            InCallManager.start({ media: 'video' });
+            InCallManager.setForceSpeakerphoneOn(true);
+            rlog.info('viewfinder', 'Audio routed to loudspeaker');
+          } catch (e: any) {
+            rlog.warn('viewfinder', 'InCallManager.start failed', { error: e?.message });
+          }
+        }
       });
     } catch (e: any) {
       rlog.fatal('viewfinder', 'WebRTC start failed', { error: e?.message });
     }
   };
 
+  const stopInCallManager = () => {
+    if (!InCallManager) return;
+    try {
+      InCallManager.setForceSpeakerphoneOn(false);
+      InCallManager.stop();
+    } catch {}
+  };
+
   const handleBack = () => {
     rlog.info('viewfinder', 'Leaving viewfinder mode');
+    stopInCallManager();
     resetRole();
     router.back();
   };
@@ -303,6 +330,7 @@ export default function ViewfinderScreen() {
   const handleDisconnect = () => {
     sendDataMessage({ type: 'disconnect' });
     cleanupWebRTC(scannedRoomId ?? undefined);
+    stopInCallManager();
     handleBack();
   };
 
